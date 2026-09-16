@@ -100,5 +100,76 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(result, {"version": 1})
 
 
+class TomlWriterTests(unittest.TestCase):
+    def test_toml_update_preserves_unrelated_settings_and_comments(self):
+        from codex_config import write_codex_config
+
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            config = tmp_path / "config.toml"
+            config.write_text(
+                '# Keep this comment\nmodel = "gpt-5.6"\n\n'
+                '[features]\nexperimental = true\n\n'
+                '[model_providers.old]\nname = "Old"\nbase_url = "http://old"\n',
+                encoding="utf-8",
+            )
+
+            write_codex_config(
+                config,
+                {"model_catalog_json": str(tmp_path / "models.json")},
+                [
+                    {
+                        "id": "openrouter",
+                        "name": "OpenRouter",
+                        "base_url": "https://openrouter.ai/api/v1",
+                        "wire_api": "responses",
+                        "auth_mode": "environment",
+                        "env_key": "OPENROUTER_API_KEY",
+                    }
+                ],
+            )
+
+            text = config.read_text(encoding="utf-8")
+            self.assertIn("# Keep this comment", text)
+            self.assertIn('model = "gpt-5.6"', text)
+            self.assertIn("[features]", text)
+            self.assertIn("experimental = true", text)
+            self.assertIn("[model_providers.openrouter]", text)
+            self.assertIn('env_key = "OPENROUTER_API_KEY"', text)
+            self.assertNotIn("[model_providers.old]", text)
+
+    def test_plaintext_mode_serializes_experimental_bearer_token(self):
+        from codex_config import write_codex_config
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.toml"
+            write_codex_config(
+                config,
+                {},
+                [
+                    {
+                        "id": "custom",
+                        "name": "Custom",
+                        "base_url": "https://example.test/v1",
+                        "wire_api": "responses",
+                        "auth_mode": "plaintext",
+                        "token": "secret-token",
+                    }
+                ],
+            )
+
+            text = config.read_text(encoding="utf-8")
+            self.assertIn('experimental_bearer_token = "secret-token"', text)
+            self.assertNotIn("env_key =", text)
+
+    def test_provider_ids_with_punctuation_use_quoted_toml_keys(self):
+        from codex_config import provider_toml_section
+
+        self.assertEqual(
+            provider_toml_section("my.provider"),
+            '[model_providers."my.provider"]',
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
