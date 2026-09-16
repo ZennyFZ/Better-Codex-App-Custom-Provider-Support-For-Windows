@@ -34,7 +34,7 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(format_log_line("ERROR", "patch failed"), "[ERROR] patch failed")
 
     def test_gui_exposes_compact_classic_utility_spec(self):
-        from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
+        from patch_chatgpt_providers_windows_gui import build_classic_ui_spec, strip_caption_style, WS_CAPTION
 
         spec = build_classic_ui_spec()
 
@@ -53,6 +53,16 @@ class WindowsGuiTests(unittest.TestCase):
             spec["title_bar"],
             {"background": "#555555", "foreground": "#f0f0f0"},
         )
+        self.assertEqual(
+            spec["header"],
+            {
+                "background": "#555555",
+                "foreground": "#f0f0f0",
+                "controls": ("MINIMIZE", "MAXIMIZE", "CLOSE"),
+            },
+        )
+        window_style = WS_CAPTION | 0x00040000
+        self.assertEqual(strip_caption_style(window_style), 0x00040000)
 
     def test_gui_spec_contains_configuration_pages(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
@@ -101,6 +111,14 @@ class WindowsGuiTests(unittest.TestCase):
             ui.root.geometry("560x360")
             ui.root.update()
 
+            for widget in (
+                ui.header,
+                ui.header_title,
+                ui.minimize_button,
+                ui.maximize_button,
+                ui.close_button,
+            ):
+                self.assertTrue(widget.winfo_ismapped())
             self.assertEqual(ui.audio_button.cget("text"), "AUDIO: OFF")
             for button in (
                 ui.audio_button,

@@ -44,6 +44,13 @@ CLASSIC_CYAN = "#b8d9f0"
 CLASSIC_YELLOW = "#f0d58c"
 CLASSIC_RED = "#ffadad"
 
+GWL_STYLE = -16
+WS_CAPTION = 0x00C00000
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_FRAMECHANGED = 0x0020
+
 BUILTIN_MENU_PROVIDER = {
     "id": "openai",
     "label": "ChatGPT / OpenAI",
@@ -73,6 +80,11 @@ def build_classic_ui_spec() -> dict[str, Any]:
         "actions": ("DOWNLOAD", "CHECK ONLY", "PATCH", "UNDO PATCH"),
         "visible_sections": ("Patch target", "Activity log"),
         "title_bar": {"background": CLASSIC_BG, "foreground": CLASSIC_TEXT},
+        "header": {
+            "background": CLASSIC_BG,
+            "foreground": CLASSIC_TEXT,
+            "controls": ("MINIMIZE", "MAXIMIZE", "CLOSE"),
+        },
         "action_labels": {
             "AUDIO": "AUDIO: OFF",
             "DOWNLOAD": "DOWNLOAD",
@@ -96,6 +108,70 @@ def build_gui_parser() -> argparse.ArgumentParser:
 
 def _default_codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+
+
+def strip_caption_style(window_style: int) -> int:
+    """Remove the native caption while preserving the rest of the window style."""
+    return int(window_style) & ~WS_CAPTION
+
+
+def _top_level_hwnd(root) -> int:
+    hwnd = int(root.winfo_id())
+    if os.name != "nt":
+        return hwnd
+    try:
+        get_parent = ctypes.windll.user32.GetParent
+        get_parent.argtypes = [ctypes.c_void_p]
+        get_parent.restype = ctypes.c_void_p
+        return int(get_parent(ctypes.c_void_p(hwnd)) or hwnd)
+    except AttributeError:  # pragma: no cover - depends on Windows support.
+        return hwnd
+
+
+def hide_native_title_bar(root) -> bool:
+    """Remove the Windows caption so the Tkinter header owns the whole chrome."""
+    if os.name != "nt":
+        root.overrideredirect(True)
+        return True
+    try:
+        user32 = ctypes.windll.user32
+        get_style = getattr(user32, "GetWindowLongPtrW", None) or user32.GetWindowLongW
+        set_style = getattr(user32, "SetWindowLongPtrW", None) or user32.SetWindowLongW
+        pointer_type = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+        get_style.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        get_style.restype = pointer_type
+        set_style.argtypes = [ctypes.c_void_p, ctypes.c_int, pointer_type]
+        set_style.restype = pointer_type
+        set_position = user32.SetWindowPos
+        set_position.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        set_position.restype = ctypes.c_int
+
+        hwnd = ctypes.c_void_p(_top_level_hwnd(root))
+        current_style = int(get_style(hwnd, GWL_STYLE))
+        new_style = strip_caption_style(current_style)
+        if new_style != current_style and int(set_style(hwnd, GWL_STYLE, new_style)) == 0:
+            return False
+        return bool(
+            set_position(
+                hwnd,
+                ctypes.c_void_p(0),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            )
+        )
+    except (AttributeError, OSError):  # pragma: no cover - depends on Windows support.
+        return False
 
 
 def apply_classic_title_bar(root, set_attribute=None) -> bool:
@@ -125,14 +201,7 @@ def apply_classic_title_bar(root, set_attribute=None) -> bool:
                 ctypes.sizeof(value),
             ) == 0
 
-    hwnd = int(root.winfo_id())
-    try:
-        get_parent = ctypes.windll.user32.GetParent
-        get_parent.argtypes = [ctypes.c_void_p]
-        get_parent.restype = ctypes.c_void_p
-        hwnd = int(get_parent(ctypes.c_void_p(hwnd)) or hwnd)
-    except AttributeError:  # pragma: no cover - depends on Windows support.
-        pass
+    hwnd = _top_level_hwnd(root)
 
     caption_applied = set_attribute(hwnd, 35, 0x00555555)
     text_applied = set_attribute(hwnd, 36, 0x00F0F0F0)
@@ -177,7 +246,8 @@ class TerminalPatcherUi:
         self.root.minsize(560, 360)
         self.root.configure(bg=spec["background"])
         self.root.update_idletasks()
-        schedule_classic_title_bar(self.root)
+        if not hide_native_title_bar(self.root):
+            self.root.overrideredirect(True)
         self.root.protocol("WM_DELETE_WINDOW", self._close_window)
 
         self._default_paths = codex_config.default_config_paths()
@@ -216,11 +286,15 @@ class TerminalPatcherUi:
         self._worker: Optional[threading.Thread] = None
         self._running = False
         self.audio_player = MciAudioPlayer(Path(__file__).resolve().parent / "media")
+        self._maximized = False
+        self._normal_geometry: Optional[str] = None
+        self._drag_offset: Optional[tuple[int, int]] = None
 
         self._build_widgets()
         self.root.after(100, self._drain_events)
 
     def _build_widgets(self) -> None:
+        self._build_custom_header()
         outer = tk.Frame(self.root, background=CLASSIC_BG, padx=8, pady=8)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
@@ -309,6 +383,84 @@ class TerminalPatcherUi:
         footer.bind("<Configure>", self._layout_footer)
         self.root.update_idletasks()
         self._layout_footer()
+
+    def _build_custom_header(self) -> None:
+        spec = build_classic_ui_spec()["header"]
+        self.header = tk.Frame(
+            self.root,
+            background=spec["background"],
+            height=32,
+            padx=8,
+        )
+        self.header.pack(fill="x", side="top")
+        self.header.pack_propagate(False)
+        self.header_title = tk.Label(
+            self.header,
+            text=self.root.title(),
+            background=spec["background"],
+            foreground=spec["foreground"],
+            anchor="w",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.header_title.pack(side="left", fill="y", expand=True)
+        controls = tk.Frame(self.header, background=spec["background"])
+        controls.pack(side="right", fill="y")
+        self.minimize_button = self._header_button(controls, "—", self._minimize_window)
+        self.maximize_button = self._header_button(controls, "□", self._toggle_maximize_window)
+        self.close_button = self._header_button(controls, "×", self._close_window)
+        for button in (self.minimize_button, self.maximize_button, self.close_button):
+            button.pack(side="left", fill="y")
+        for widget in (self.header, self.header_title):
+            widget.bind("<ButtonPress-1>", self._begin_window_drag)
+            widget.bind("<B1-Motion>", self._drag_window)
+            widget.bind("<Double-Button-1>", self._toggle_maximize_window)
+
+    def _header_button(self, parent, text: str, command):
+        return tk.Button(
+            parent,
+            text=text,
+            command=command,
+            background=CLASSIC_BG,
+            foreground=CLASSIC_TEXT,
+            activebackground=CLASSIC_BUTTON_ACTIVE,
+            activeforeground=CLASSIC_TEXT,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            padx=9,
+            pady=0,
+            font=("Segoe UI Symbol", 10),
+        )
+
+    def _minimize_window(self) -> None:
+        self.root.iconify()
+
+    def _toggle_maximize_window(self, _event=None) -> None:
+        if self._maximized:
+            self.root.state("normal")
+            if self._normal_geometry:
+                self.root.geometry(self._normal_geometry)
+            self._maximized = False
+            self.maximize_button.configure(text="□")
+            return
+        self._normal_geometry = self.root.geometry()
+        self.root.state("zoomed")
+        self._maximized = True
+        self.maximize_button.configure(text="❐")
+
+    def _begin_window_drag(self, event) -> None:
+        if self._maximized:
+            return
+        self._drag_offset = (
+            event.x_root - self.root.winfo_x(),
+            event.y_root - self.root.winfo_y(),
+        )
+
+    def _drag_window(self, event) -> None:
+        if self._maximized or self._drag_offset is None:
+            return
+        x_offset, y_offset = self._drag_offset
+        self.root.geometry(f"+{event.x_root - x_offset}+{event.y_root - y_offset}")
 
     def _layout_footer(self, _event=None) -> None:
         """Wrap the action group at compact widths instead of clipping buttons."""
