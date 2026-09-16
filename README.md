@@ -127,34 +127,28 @@ python .\patch_chatgpt_providers_windows_gui.py `
   --app-root 'D:\Apps\ChatGPT-portable'
 ```
 
-The GUI is the recommended Windows workflow: it edits providers, credentials,
-models, model-to-provider mappings, and the patched provider menu without
-opening TOML or JSON in a text editor. The GUI runs archive work in a
-background thread and never installs or launches `ChatGPT.exe`.
+The GUI is the recommended Windows workflow for patching: it does not edit,
+create, or validate providers, credentials, models, or model-to-provider
+mappings. Edit those files yourself in a text editor first. The GUI only
+checks the portable layout and patches `app.asar` in a background thread; it
+never installs or launches `ChatGPT.exe`.
 
 First run:
 
 1. Double-click `launch_windows_portable_patcher.bat`.
-2. Follow the `How to use` strip at the top: choose the extracted portable
-   root, then click `LOAD CONFIG`. The default Codex paths are shown under
-   `Step 1 - Portable folder and files`; normally they do not need editing.
-3. Add a provider. Choose `environment` to store only `env_key` in
-   `config.toml`; optionally select the checkbox to save its value to the
-   current Windows user's environment. Restart already-running apps after
-   changing an environment variable.
-4. On `2. Models`, choose a template and add the model slug, display name,
-   description, and provider. The advanced metadata is inherited from the
-   template and can be adjusted in the form.
-5. On `3. Provider menu`, review labels, choose the default provider, and
-   edit `Automatic model mappings`.
-6. Click `SAVE CONFIG`, then `VALIDATE`, then `CHECK ONLY`. Close portable
-   ChatGPT and click `PATCH`.
+2. Edit these files manually if needed:
+   `%USERPROFILE%\.codex\config.toml`,
+   `%USERPROFILE%\.codex\desktop-model-providers.json`, and
+   `%USERPROFILE%\.codex\model-catalogs\custom.json`.
+3. In the GUI, choose the extracted portable root and click `CHECK ONLY`.
+4. Close portable ChatGPT, then click `PATCH`. The GUI creates a backup and
+   changes only the portable app's `app.asar`.
 
 `plaintext` authentication is available for providers that require a direct
-bearer token, but it is experimental/insecure. The token field is masked and
-the GUI asks for explicit confirmation before saving it as
-`experimental_bearer_token` in `config.toml`. Credentials are never written
-to provider-menu JSON, model catalog JSON, or GUI settings.
+bearer token, but it is experimental/insecure. Configure it manually in
+`config.toml`; the patch-only GUI never reads or writes credentials. The
+patcher does not modify provider-menu JSON, model catalog JSON, or GUI
+settings.
 
 For one-click use, double-click `launch_windows_portable_patcher.bat` beside
 the Python files. It opens the GUI without prefilled portable paths; choose
@@ -186,12 +180,11 @@ before patching again.
 
 ## Configuration schema reference (optional)
 
-The GUI creates and maintains Codex's custom model catalog. If the catalog is
-missing, `LOAD` attempts to seed it with `codex debug models --bundled`; if
-the CLI is unavailable, select an existing catalog in `Locations (advanced)`.
-The editor clones a template so advanced metadata is not accidentally lost.
+Edit Codex's custom model catalog manually. Keep its advanced metadata intact
+when changing a model; this patch-only GUI does not seed, clone, or rewrite
+the catalog.
 
-The GUI also creates and maintains the patched provider menu:
+Edit the patched provider menu manually as well:
 
 ```text
 ~/.codex/desktop-model-providers.json
@@ -229,7 +222,9 @@ Example:
 - Every custom provider ID must match a `[model_providers.<id>]` section in `config.toml`.
 - API keys do not belong in this JSON file.
 
-The app reloads this file when the provider menu opens and before a new task starts. Repatching is not required after editing it, although the GUI's `SAVE` action is preferred because it validates mappings and creates backups.
+The app reloads this file when the provider menu opens and before a new task
+starts. Repatching is not required after editing it; run `CHECK ONLY` again if
+you want to verify the portable bundle before a new patch.
 
 ## Updates and recovery
 

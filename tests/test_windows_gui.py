@@ -41,7 +41,7 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(spec["background"], "#555555")
         self.assertEqual(
             spec["fields"],
-            ("Portable root:", "Config JSON:", "Backup directory:"),
+            ("Portable root (required):", "Backup directory (optional):"),
         )
         self.assertEqual(spec["buttons"], ("CHECK ONLY", "PATCH", "CLEAR LOG"))
 
@@ -50,11 +50,8 @@ class WindowsGuiTests(unittest.TestCase):
 
         spec = build_classic_ui_spec()
 
-        self.assertEqual(spec["pages"], ("Setup", "Models", "Provider menu"))
-        self.assertEqual(
-            spec["actions"],
-            ("LOAD", "SAVE", "VALIDATE", "CHECK ONLY", "PATCH"),
-        )
+        self.assertEqual(spec["pages"], ("Setup",))
+        self.assertEqual(spec["actions"], ("CHECK ONLY", "PATCH"))
 
     def test_gui_spec_explains_the_first_run_workflow(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
@@ -64,20 +61,16 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(
             spec["workflow_steps"],
             (
-                "1. Choose the extracted portable root",
-                "2. LOAD CONFIG to read the current settings",
-                "3. Configure providers, models, and provider menu",
-                "4. SAVE CONFIG, then VALIDATE",
-                "5. CHECK ONLY, then PATCH",
+                "1. Edit providers and models in the Codex files yourself",
+                "2. Choose the extracted portable root",
+                "3. CHECK ONLY to scan without changing files",
+                "4. PATCH to backup and patch app.asar",
             ),
         )
-        self.assertEqual(spec["next_action"], "Choose Portable root, then click LOAD CONFIG.")
+        self.assertEqual(spec["next_action"], "Choose Portable root, then click CHECK ONLY.")
         self.assertEqual(
             spec["action_labels"],
             {
-                "LOAD": "LOAD CONFIG",
-                "SAVE": "SAVE CONFIG",
-                "VALIDATE": "VALIDATE",
                 "CHECK ONLY": "CHECK ONLY",
                 "PATCH": "PATCH",
             },
@@ -85,16 +78,19 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(
             spec["page_help"],
             {
-                "Setup": "Step 1 of 3: choose the portable folder and configure providers.",
-                "Models": "Step 2 of 3: add models and assign each model to a provider.",
-                "Provider menu": "Step 3 of 3: choose which providers appear in Codex.",
+                "Setup": "Choose the portable folder and patch it; providers and models are edited outside this tool.",
             },
         )
 
-    def test_gui_spec_explains_plaintext_warning(self):
+    def test_gui_spec_explains_manual_configuration_files(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
 
-        self.assertIn("plaintext", build_classic_ui_spec()["plaintext_warning"].lower())
+        spec = build_classic_ui_spec()
+
+        self.assertIn("does not edit", spec["manual_edit_note"].lower())
+        self.assertIn("config.toml", spec["manual_files"])
+        self.assertIn("desktop-model-providers.json", spec["manual_files"])
+        self.assertIn("custom.json", spec["manual_files"])
 
     def test_one_click_batch_launches_gui_without_path_arguments(self):
         launcher = Path(__file__).parents[1] / "launch_windows_portable_patcher.bat"

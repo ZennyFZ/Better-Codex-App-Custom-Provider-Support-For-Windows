@@ -3,6 +3,7 @@ import unittest
 import hashlib
 import json
 from pathlib import Path
+from unittest import mock
 
 import windows_portable as portable
 from windows_portable import PatchError, locate_portable_app
@@ -138,6 +139,35 @@ class CurrentBuildPatchTests(unittest.TestCase):
 
             self.assertEqual(central.read_bytes(), b"unsupported")
             self.assertEqual(picker.read_bytes(), original_picker)
+
+    def test_patch_only_mode_does_not_prepare_or_write_provider_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "portable"
+            resources = root / "app" / "resources"
+            resources.mkdir(parents=True)
+            executable = root / "app" / "ChatGPT.exe"
+            executable.write_bytes(b"MZ")
+            asar = resources / "app.asar"
+            asar.write_bytes(b"archive")
+            unpacked = resources / "app.asar.unpacked"
+            unpacked.mkdir()
+            app = portable.PortableApp(root, executable, resources, asar, unpacked)
+            backup = Path(temp) / "backups" / "app.asar.orig"
+            config = Path(temp) / "desktop-model-providers.json"
+
+            with mock.patch.object(portable, "_extract_target_sources", return_value=(
+                {}, 0, "central.js", "picker.js", b"central", b"picker"
+            )), mock.patch.object(portable, "_patch_central_source", return_value="central-patched"), mock.patch.object(
+                portable, "_patch_picker_source", return_value="picker-patched"
+            ), mock.patch.object(portable, "backup_portable_asar", return_value=backup), mock.patch.object(
+                portable, "rebuild_asar_with_replacements"
+            ), mock.patch.object(
+                portable, "_atomic_replace"
+            ), mock.patch.object(portable, "ensure_provider_config") as ensure:
+                portable.patch_portable_app(app, config, backup.parent, create_config=False)
+
+            ensure.assert_not_called()
+            self.assertFalse(config.exists())
 
 
 class AsarRebuildTests(unittest.TestCase):

@@ -1,4 +1,10 @@
-# User-friendly Windows provider configurator
+# Earlier Windows provider configurator design (superseded)
+
+> The current GUI intentionally uses a simpler patch-only workflow: users edit
+> `config.toml`, `desktop-model-providers.json`, and the model catalog manually;
+> the GUI only checks and patches the extracted portable app. The requirements
+> below are retained as the historical design that led to the configurator
+> implementation, but they are not the current product behavior.
 
 ## Goal
 

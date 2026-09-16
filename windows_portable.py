@@ -613,8 +613,14 @@ def patch_portable_app(
     allow_running: bool = False,
     overwrite_config: bool = False,
     check_only: bool = False,
+    create_config: bool = True,
 ) -> Optional[Path]:
-    """Validate and patch a portable app; return the original ASAR backup."""
+    """Validate and patch a portable app; return the original ASAR backup.
+
+    ``create_config=False`` is used by the patch-only GUI. It leaves the
+    provider JSON entirely under the user's control instead of creating or
+    rewriting a default file during the archive patch.
+    """
 
     validate_portable_layout(app)
     running = find_windows_app_processes(app.root)
@@ -635,8 +641,9 @@ def patch_portable_app(
     if check_only:
         return None
 
-    config_action = ensure_provider_config(Path(config).expanduser(), overwrite_config)
-    del config_action  # The CLI reports config details; the patcher stays composable.
+    if create_config:
+        config_action = ensure_provider_config(Path(config).expanduser(), overwrite_config)
+        del config_action  # The CLI reports config details; the patcher stays composable.
     backup = backup_portable_asar(app, Path(backup_dir).expanduser())
     temporary_archive = app.asar.with_name(f".{app.asar.name}.patched-{os.getpid()}")
     try:
