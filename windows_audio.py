@@ -28,6 +28,7 @@ class MciAudioPlayer:
     """Play one file from ``media`` without opening a console or player window."""
 
     _SUPPORTED_SUFFIXES = (".mp3", ".wav")
+    DEFAULT_VOLUME = 250
 
     def __init__(
         self,
@@ -70,6 +71,13 @@ class MciAudioPlayer:
             if result:
                 raise AudioError(f"Windows could not open the audio file (code {result}).")
             self._is_open = True
+
+        result = self._send_command(
+            f"setaudio {self.alias} volume to {self.DEFAULT_VOLUME}"
+        )
+        if result:
+            self.stop()
+            raise AudioError(f"Windows could not set the audio volume (code {result}).")
 
         result = self._send_command(f"play {self.alias} repeat")
         if result:

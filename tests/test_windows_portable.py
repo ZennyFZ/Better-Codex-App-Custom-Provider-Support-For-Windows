@@ -177,6 +177,68 @@ class ProcessAndBackupTests(unittest.TestCase):
             self.assertEqual(backup.read_bytes(), asar.read_bytes())
             self.assertEqual(hashlib.sha256(backup.read_bytes()).digest(), hashlib.sha256(asar.read_bytes()).digest())
 
+    def test_restore_uses_the_latest_portable_backup_and_preserves_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "portable"
+            resources = root / "app" / "resources"
+            resources.mkdir(parents=True)
+            (root / "app" / "ChatGPT.exe").write_bytes(b"MZ")
+            asar = resources / "app.asar"
+            asar.write_bytes(b"patched")
+            (resources / "app.asar.unpacked").mkdir()
+            app = locate_portable_app(root)
+            backups = Path(temp) / "backups"
+            backups.mkdir()
+            older = backups / "ChatGPT-portable-app-20260101-010101.asar"
+            latest = backups / "ChatGPT-portable-app-20260102-010101.asar"
+            older.write_bytes(b"older original")
+            latest.write_bytes(b"latest original")
+            (backups / "unrelated.asar").write_bytes(b"must not restore")
+
+            restored = portable.restore_portable_asar(app, backups)
+
+            self.assertEqual(restored, latest)
+            self.assertEqual(asar.read_bytes(), b"latest original")
+            self.assertEqual(latest.read_bytes(), b"latest original")
+
+    def test_restore_requires_a_matching_backup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "portable"
+            resources = root / "app" / "resources"
+            resources.mkdir(parents=True)
+            (root / "app" / "ChatGPT.exe").write_bytes(b"MZ")
+            asar = resources / "app.asar"
+            asar.write_bytes(b"patched")
+            (resources / "app.asar.unpacked").mkdir()
+            app = locate_portable_app(root)
+
+            with self.assertRaises(PatchError):
+                portable.restore_portable_asar(app, Path(temp) / "empty-backups")
+
+            self.assertEqual(asar.read_bytes(), b"patched")
+
+    def test_restore_selects_the_later_suffix_when_backups_share_a_timestamp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "portable"
+            resources = root / "app" / "resources"
+            resources.mkdir(parents=True)
+            (root / "app" / "ChatGPT.exe").write_bytes(b"MZ")
+            asar = resources / "app.asar"
+            asar.write_bytes(b"patched")
+            (resources / "app.asar.unpacked").mkdir()
+            app = locate_portable_app(root)
+            backups = Path(temp) / "backups"
+            backups.mkdir()
+            first = backups / "ChatGPT-portable-app-20260103-010101.asar"
+            later = backups / "ChatGPT-portable-app-20260103-010101-1.asar"
+            first.write_bytes(b"first original")
+            later.write_bytes(b"later original")
+
+            restored = portable.restore_portable_asar(app, backups)
+
+            self.assertEqual(restored, later)
+            self.assertEqual(asar.read_bytes(), b"later original")
+
 
 class CurrentBuildPatchTests(unittest.TestCase):
     def make_sources(self, directory: Path) -> tuple[Path, Path]:

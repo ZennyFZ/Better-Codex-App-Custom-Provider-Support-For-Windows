@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import os
 from pathlib import Path
 import queue
@@ -16,6 +17,7 @@ from windows_portable import (
     find_windows_app_processes,
     locate_portable_app,
     patch_portable_app,
+    restore_portable_asar,
 )
 from windows_audio import AudioError, MciAudioPlayer
 from windows_download import PORTABLE_DOWNLOAD_URL, download_and_extract_portable
@@ -59,15 +61,24 @@ def build_classic_ui_spec() -> dict[str, Any]:
         "geometry": "620x460",
         "background": CLASSIC_BG,
         "fields": ("Portable root (required):", "Backup directory (optional):"),
-        "buttons": ("AUDIO: OFF", "DOWNLOAD", "CHECK ONLY", "PATCH", "CLEAR LOG"),
+        "buttons": (
+            "AUDIO: OFF",
+            "DOWNLOAD",
+            "CHECK ONLY",
+            "PATCH",
+            "UNDO PATCH",
+            "CLEAR LOG",
+        ),
         "pages": ("Setup",),
-        "actions": ("DOWNLOAD", "CHECK ONLY", "PATCH"),
+        "actions": ("DOWNLOAD", "CHECK ONLY", "PATCH", "UNDO PATCH"),
         "visible_sections": ("Patch target", "Activity log"),
+        "title_bar": {"background": CLASSIC_BG, "foreground": CLASSIC_TEXT},
         "action_labels": {
             "AUDIO": "AUDIO: OFF",
             "DOWNLOAD": "DOWNLOAD",
             "CHECK ONLY": "CHECK ONLY",
             "PATCH": "PATCH",
+            "UNDO PATCH": "UNDO PATCH",
         },
         "patch_note": "CHECK ONLY scans. PATCH backs up and replaces app.asar.",
     }
@@ -85,6 +96,51 @@ def build_gui_parser() -> argparse.ArgumentParser:
 
 def _default_codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+
+
+def apply_classic_title_bar(root, set_attribute=None) -> bool:
+    """Apply the classic palette to the native Windows title bar when supported."""
+    if os.name != "nt" and set_attribute is None:
+        return False
+
+    if set_attribute is None:
+        try:
+            dwm_set_window_attribute = ctypes.windll.dwmapi.DwmSetWindowAttribute
+            dwm_set_window_attribute.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_uint,
+                ctypes.c_void_p,
+                ctypes.c_uint,
+            ]
+            dwm_set_window_attribute.restype = ctypes.c_long
+        except AttributeError:  # pragma: no cover - depends on Windows support.
+            return False
+
+        def set_attribute(hwnd, attribute, color):
+            value = ctypes.c_uint32(color)
+            return dwm_set_window_attribute(
+                ctypes.c_void_p(hwnd),
+                attribute,
+                ctypes.byref(value),
+                ctypes.sizeof(value),
+            ) == 0
+
+    hwnd = int(root.winfo_id())
+    try:
+        get_parent = ctypes.windll.user32.GetParent
+        get_parent.argtypes = [ctypes.c_void_p]
+        get_parent.restype = ctypes.c_void_p
+        hwnd = int(get_parent(ctypes.c_void_p(hwnd)) or hwnd)
+    except AttributeError:  # pragma: no cover - depends on Windows support.
+        pass
+
+    caption_applied = set_attribute(hwnd, 35, 0x00555555)
+    text_applied = set_attribute(hwnd, 36, 0x00F0F0F0)
+    if caption_applied and text_applied:
+        return True
+    # Windows 10 does not expose custom caption colors, but supports the
+    # immersive dark title-bar flag when applied to the top-level HWND.
+    return bool(set_attribute(hwnd, 20, 1))
 
 
 class TerminalPatcherUi:
@@ -108,6 +164,8 @@ class TerminalPatcherUi:
         self.root.geometry(spec["geometry"])
         self.root.minsize(560, 360)
         self.root.configure(bg=spec["background"])
+        self.root.update_idletasks()
+        apply_classic_title_bar(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self._close_window)
 
         self._default_paths = codex_config.default_config_paths()
@@ -198,6 +256,7 @@ class TerminalPatcherUi:
             ("SCAN", CLASSIC_CYAN),
             ("OK", CLASSIC_GREEN),
             ("PATCH", CLASSIC_YELLOW),
+            ("UNDO", CLASSIC_YELLOW),
             ("ERROR", CLASSIC_RED),
         ):
             self.log.tag_configure(level, foreground=color)
@@ -206,9 +265,15 @@ class TerminalPatcherUi:
         footer.grid(row=2, column=0, sticky="ew")
         labels = build_classic_ui_spec()["action_labels"]
         left_controls = tk.Frame(footer, background=CLASSIC_BG)
-        left_controls.pack(side="left")
         right_controls = tk.Frame(footer, background=CLASSIC_BG)
-        right_controls.pack(side="right")
+        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(1, weight=1)
+        left_controls.grid(row=0, column=0, sticky="w")
+        right_controls.grid(row=0, column=1, sticky="e")
+        self._footer = footer
+        self._left_controls = left_controls
+        self._right_controls = right_controls
+        self._footer_wrapped = None
         self.audio_button = self._classic_button(
             left_controls, labels["AUDIO"], self._toggle_audio
         )
@@ -219,12 +284,36 @@ class TerminalPatcherUi:
         self.download_button.pack(side="left", padx=(5, 0))
         self.clear_button = self._classic_button(right_controls, "CLEAR LOG", self._clear_log)
         self.clear_button.pack(side="right")
+        self.undo_button = self._classic_button(
+            right_controls, labels["UNDO PATCH"], self._start_undo
+        )
+        self.undo_button.pack(side="right", padx=(5, 0))
         self.patch_button = self._classic_button(right_controls, labels["PATCH"], self._start_patch)
         self.patch_button.pack(side="right", padx=(5, 0))
         self.check_button = self._classic_button(
             right_controls, labels["CHECK ONLY"], self._start_check
         )
         self.check_button.pack(side="right", padx=(5, 0))
+        footer.bind("<Configure>", self._layout_footer)
+        self.root.update_idletasks()
+        self._layout_footer()
+
+    def _layout_footer(self, _event=None) -> None:
+        """Wrap the action group at compact widths instead of clipping buttons."""
+        width = self._footer.winfo_width()
+        if width <= 1:
+            return
+        required = self._left_controls.winfo_reqwidth() + self._right_controls.winfo_reqwidth() + 8
+        wrapped = width < required
+        if wrapped == self._footer_wrapped:
+            return
+        self._footer_wrapped = wrapped
+        if wrapped:
+            self._left_controls.grid(row=0, column=0, columnspan=2, sticky="w")
+            self._right_controls.grid(row=1, column=0, columnspan=2, sticky="e", pady=(5, 0))
+        else:
+            self._left_controls.grid(row=0, column=0, columnspan=1, sticky="w")
+            self._right_controls.grid(row=0, column=1, columnspan=1, sticky="e", pady=0)
 
     def _show_page(self, page: str) -> None:
         if page not in build_classic_ui_spec()["pages"]:
@@ -1207,6 +1296,15 @@ class TerminalPatcherUi:
         if selected:
             self._start_worker("download", destination=Path(selected))
 
+    def _start_undo(self) -> None:
+        if not messagebox.askyesno(
+            "Undo portable patch",
+            "Restore the newest original app.asar backup?\n\n"
+            "The backup will be kept. The installed MSIX will not be changed.",
+        ):
+            return
+        self._start_worker("undo")
+
     def _start_patch(self) -> None:
         if not messagebox.askyesno(
             "Patch portable ChatGPT",
@@ -1221,7 +1319,7 @@ class TerminalPatcherUi:
         if self._running:
             return
         try:
-            if action not in {"check", "patch", "download"}:
+            if action not in {"check", "patch", "download", "undo"}:
                 raise PatchError(f"Unsupported GUI action: {action}")
             if action == "download":
                 if destination is None:
@@ -1235,7 +1333,12 @@ class TerminalPatcherUi:
         self._running = True
         self._set_busy(True)
         self.status_var.set(
-            {"check": "CHECKING", "patch": "PATCHING", "download": "DOWNLOADING"}[action]
+            {
+                "check": "CHECKING",
+                "patch": "PATCHING",
+                "download": "DOWNLOADING",
+                "undo": "UNDOING",
+            }[action]
         )
         self._worker = threading.Thread(
             target=self._worker_main,
@@ -1280,6 +1383,13 @@ class TerminalPatcherUi:
                 self._events.put(("log", ("OK", "Layout and current ASAR patch markers are compatible.")))
                 return
 
+            if action == "undo":
+                self._events.put(("log", ("UNDO", "Restoring the newest original app.asar backup...")))
+                restored_backup = restore_portable_asar(app, backup)
+                self._events.put(("log", ("OK", f"Undo complete: {app.asar}")))
+                self._events.put(("log", ("OK", f"Backup kept: {restored_backup}")))
+                return
+
             self._events.put(("log", ("PATCH", "Creating original app.asar backup...")))
             original_backup = patch_portable_app(app, config, backup, create_config=False)
             self._events.put(("log", ("OK", f"Patch complete: {app.asar}")))
@@ -1298,6 +1408,7 @@ class TerminalPatcherUi:
         self.clear_button.configure(state=state)
         self.download_button.configure(state=state)
         self.audio_button.configure(state=state)
+        self.undo_button.configure(state=state)
         for button in getattr(self, "page_buttons", {}).values():
             button.configure(state=state)
 

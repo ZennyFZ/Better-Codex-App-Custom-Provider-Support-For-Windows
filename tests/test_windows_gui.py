@@ -46,9 +46,13 @@ class WindowsGuiTests(unittest.TestCase):
         )
         self.assertEqual(
             spec["buttons"],
-            ("AUDIO: OFF", "DOWNLOAD", "CHECK ONLY", "PATCH", "CLEAR LOG"),
+            ("AUDIO: OFF", "DOWNLOAD", "CHECK ONLY", "PATCH", "UNDO PATCH", "CLEAR LOG"),
         )
         self.assertEqual(spec["visible_sections"], ("Patch target", "Activity log"))
+        self.assertEqual(
+            spec["title_bar"],
+            {"background": "#555555", "foreground": "#f0f0f0"},
+        )
 
     def test_gui_spec_contains_configuration_pages(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
@@ -56,7 +60,7 @@ class WindowsGuiTests(unittest.TestCase):
         spec = build_classic_ui_spec()
 
         self.assertEqual(spec["pages"], ("Setup",))
-        self.assertEqual(spec["actions"], ("DOWNLOAD", "CHECK ONLY", "PATCH"))
+        self.assertEqual(spec["actions"], ("DOWNLOAD", "CHECK ONLY", "PATCH", "UNDO PATCH"))
 
     def test_gui_spec_is_patch_only(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
@@ -70,6 +74,7 @@ class WindowsGuiTests(unittest.TestCase):
                 "DOWNLOAD": "DOWNLOAD",
                 "CHECK ONLY": "CHECK ONLY",
                 "PATCH": "PATCH",
+                "UNDO PATCH": "UNDO PATCH",
             },
         )
         self.assertEqual(spec["patch_note"], "CHECK ONLY scans. PATCH backs up and replaces app.asar.")
@@ -102,12 +107,18 @@ class WindowsGuiTests(unittest.TestCase):
                 ui.download_button,
                 ui.check_button,
                 ui.patch_button,
+                ui.undo_button,
                 ui.clear_button,
             ):
                 self.assertTrue(button.winfo_ismapped())
                 self.assertLessEqual(
                     button.winfo_rooty() + button.winfo_height(),
                     ui.root.winfo_rooty() + ui.root.winfo_height(),
+                )
+                self.assertGreaterEqual(button.winfo_rootx(), ui.root.winfo_rootx())
+                self.assertLessEqual(
+                    button.winfo_rootx() + button.winfo_width(),
+                    ui.root.winfo_rootx() + ui.root.winfo_width(),
                 )
             self.assertGreater(ui.clear_button.winfo_rooty(), ui.log.winfo_rooty())
         except tk.TclError as exc:
@@ -132,11 +143,44 @@ class WindowsGuiTests(unittest.TestCase):
             self.assertTrue(player.toggle())
             self.assertTrue(player.enabled)
             self.assertIn('open "', commands[0])
-            self.assertIn("play better_codex_audio repeat", commands[1])
+            self.assertEqual(commands[1], "setaudio better_codex_audio volume to 250")
+            self.assertIn("play better_codex_audio repeat", commands[2])
 
             self.assertFalse(player.toggle())
             self.assertFalse(player.enabled)
             self.assertEqual(commands[-2:], ["stop better_codex_audio", "close better_codex_audio"])
+
+    def test_title_bar_applies_classic_colors(self):
+        from patch_chatgpt_providers_windows_gui import apply_classic_title_bar
+
+        calls = []
+
+        class FakeRoot:
+            def winfo_id(self):
+                return 1234
+
+        def set_attribute(hwnd, attribute, color):
+            calls.append((hwnd, attribute, color))
+            return True
+
+        self.assertTrue(apply_classic_title_bar(FakeRoot(), set_attribute=set_attribute))
+        self.assertEqual(calls, [(1234, 35, 0x00555555), (1234, 36, 0x00F0F0F0)])
+
+    def test_title_bar_falls_back_to_dark_mode_when_caption_colors_are_unsupported(self):
+        from patch_chatgpt_providers_windows_gui import apply_classic_title_bar
+
+        calls = []
+
+        class FakeRoot:
+            def winfo_id(self):
+                return 1234
+
+        def set_attribute(hwnd, attribute, color):
+            calls.append((hwnd, attribute, color))
+            return attribute == 20
+
+        self.assertTrue(apply_classic_title_bar(FakeRoot(), set_attribute=set_attribute))
+        self.assertEqual([attribute for _hwnd, attribute, _color in calls], [35, 36, 20])
 
     def test_audio_player_reports_missing_media_without_playing(self):
         from windows_audio import AudioError, MciAudioPlayer

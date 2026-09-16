@@ -293,6 +293,37 @@ def backup_portable_asar(app: PortableApp, backup_dir: Path) -> Path:
     return backup
 
 
+def latest_portable_asar_backup(backup_dir: Path) -> Path:
+    """Return the newest backup created by ``backup_portable_asar``."""
+    directory = Path(backup_dir).expanduser()
+    if not directory.is_dir():
+        raise PatchError(f"Backup directory does not exist: {directory}")
+    pattern = re.compile(
+        r"ChatGPT-portable-app-(\d{8}-\d{6})(?:-(\d+))?\.asar\Z",
+        re.IGNORECASE,
+    )
+    backups = []
+    for path in directory.glob("ChatGPT-portable-app-*.asar"):
+        match = pattern.fullmatch(path.name)
+        if path.is_file() and match:
+            backups.append((match.group(1), int(match.group(2) or 0), path))
+    if not backups:
+        raise PatchError(
+            f"No portable ASAR backup was found in: {directory}"
+        )
+    return max(backups, key=lambda item: (item[0], item[1]))[2]
+
+
+def restore_portable_asar(app: PortableApp, backup_dir: Path) -> Path:
+    """Restore the newest original ASAR backup without deleting any backup."""
+    validate_portable_layout(app)
+    backup = latest_portable_asar_backup(backup_dir)
+    _atomic_replace(backup, app.asar)
+    if _sha256_file(backup) != _sha256_file(app.asar):
+        raise PatchError(f"Restored ASAR checksum verification failed: {app.asar}")
+    return backup
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:

@@ -146,9 +146,11 @@ First run:
 4. In the GUI, choose the extracted portable root and click `CHECK ONLY`.
 5. Close portable ChatGPT, then click `PATCH`. The GUI creates a backup and
    changes only the portable app's `app.asar`.
+6. If needed, click `UNDO PATCH` to restore the newest backup. The backup is
+   kept, so it can be used again later.
 
 The optional `AUDIO: OFF` button plays the first `.mp3` or `.wav` file beside
-the GUI in `media`. Audio is always off when the GUI starts.
+the GUI in `media` at reduced volume. Audio is always off when the GUI starts.
 
 `plaintext` authentication is available for providers that require a direct
 bearer token, but it is experimental/insecure. Configure it manually in
