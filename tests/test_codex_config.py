@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 class ConfigValidationTests(unittest.TestCase):
@@ -169,6 +170,36 @@ class TomlWriterTests(unittest.TestCase):
             provider_toml_section("my.provider"),
             '[model_providers."my.provider"]',
         )
+
+
+class CredentialTests(unittest.TestCase):
+    def test_environment_mode_sets_env_key_without_exposing_secret(self):
+        import codex_config
+
+        calls = []
+        with mock.patch.object(
+            codex_config,
+            "_write_user_environment",
+            side_effect=lambda name, value: calls.append((name, value)),
+        ):
+            provider = {
+                "auth_mode": "environment",
+                "env_key": "CUSTOM_API_KEY",
+                "token": "secret",
+            }
+            codex_config.apply_environment_credential(provider)
+
+        self.assertEqual(calls, [("CUSTOM_API_KEY", "secret")])
+        summary = codex_config.credential_summary(provider)
+        self.assertEqual(summary, "environment variable CUSTOM_API_KEY")
+        self.assertNotIn("secret", summary)
+
+    def test_plaintext_mode_requires_token(self):
+        from codex_config import validate_credential_mode
+        from windows_portable import PatchError
+
+        with self.assertRaises(PatchError):
+            validate_credential_mode({"auth_mode": "plaintext", "token": ""})
 
 
 if __name__ == "__main__":

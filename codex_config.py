@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 try:
     import tomllib
@@ -175,6 +175,108 @@ def save_gui_settings(path: Path, settings: Dict[str, Any]) -> None:
         )
     except (OSError, TypeError, ValueError) as exc:
         raise PatchError(f"Cannot write GUI settings: {exc}") from exc
+
+
+def _write_user_environment(name: str, value: str) -> None:
+    """Write a variable to the current Windows user's environment."""
+
+    if os.name != "nt":
+        raise PatchError(f"User environment persistence is only supported on Windows ({name})")
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Environment",
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            key.SetValueEx(name, 0, winreg.REG_SZ, value)
+        os.environ[name] = value
+        try:
+            import ctypes
+
+            result = ctypes.c_ulong()
+            ctypes.windll.user32.SendMessageTimeoutW(
+                0xFFFF,
+                0x001A,
+                0,
+                "Environment",
+                0x0002,
+                5000,
+                ctypes.byref(result),
+            )
+        except (AttributeError, OSError):
+            pass
+    except (OSError, ImportError) as exc:
+        raise PatchError(f"Cannot set Windows user environment variable {name}: {exc}") from exc
+
+
+def set_user_environment_variable(
+    name: str,
+    value: str,
+    registry_writer: Optional[Callable[[str, str], None]] = None,
+) -> None:
+    """Persist a variable for the current user and update this process."""
+
+    name = _require_non_empty_string(name, "Environment variable name is required")
+    if not _ENVIRONMENT_NAME.fullmatch(name):
+        raise PatchError(f"Invalid environment variable name: {name}")
+    if not isinstance(value, str):
+        raise PatchError(f"Environment variable {name} value must be a string")
+    try:
+        if registry_writer is None:
+            _write_user_environment(name, value)
+        else:
+            registry_writer(name, value)
+            os.environ[name] = value
+    except PatchError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise PatchError(f"Cannot set Windows user environment variable {name}: {exc}") from exc
+
+
+def validate_credential_mode(provider: dict[str, Any]) -> None:
+    if not isinstance(provider, dict):
+        raise PatchError("Provider credential configuration must be an object")
+    mode = provider.get("auth_mode", "none")
+    if mode not in {"none", "environment", "plaintext"}:
+        raise PatchError("Unsupported provider authentication mode")
+    if mode == "environment":
+        env_key = _require_non_empty_string(
+            provider.get("env_key"),
+            "Environment authentication needs a variable name",
+        )
+        if not _ENVIRONMENT_NAME.fullmatch(env_key):
+            raise PatchError("Invalid environment variable name")
+        if "token" in provider and not isinstance(provider.get("token"), str):
+            raise PatchError("Environment credential value must be a string")
+    elif mode == "plaintext":
+        _require_non_empty_string(
+            provider.get("token"),
+            "Plaintext authentication needs a bearer token",
+        )
+
+
+def apply_environment_credential(provider: dict[str, Any]) -> None:
+    """Optionally persist an environment-mode token without returning its value."""
+
+    validate_credential_mode(provider)
+    if provider.get("auth_mode", "none") != "environment":
+        return
+    token = provider.get("token", "")
+    if token:
+        set_user_environment_variable(provider["env_key"], token)
+
+
+def credential_summary(provider: dict[str, Any]) -> str:
+    validate_credential_mode(provider)
+    mode = provider.get("auth_mode", "none")
+    if mode == "environment":
+        return f"environment variable {provider['env_key']}"
+    if mode == "plaintext":
+        return "plaintext bearer token"
+    return "no credentials"
 
 
 def serialize_toml_string(value: str) -> str:
