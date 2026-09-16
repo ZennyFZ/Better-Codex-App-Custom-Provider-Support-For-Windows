@@ -51,6 +51,8 @@ SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_FRAMECHANGED = 0x0020
+WM_NCLBUTTONDOWN = 0x00A1
+HTCAPTION = 2
 
 BUILTIN_MENU_PROVIDER = {
     "id": "openai",
@@ -172,6 +174,34 @@ def hide_native_title_bar(root) -> bool:
             )
         )
     except (AttributeError, OSError):  # pragma: no cover - depends on Windows support.
+        return False
+
+
+def begin_native_window_drag(
+    hwnd: int,
+    release_capture=None,
+    send_message=None,
+) -> bool:
+    """Ask Windows to run its native move loop for the custom header."""
+    try:
+        user32 = ctypes.windll.user32
+        if release_capture is None:
+            release_capture = user32.ReleaseCapture
+            release_capture.argtypes = []
+            release_capture.restype = ctypes.c_int
+        if send_message is None:
+            send_message = user32.SendMessageW
+            send_message.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_uint,
+                ctypes.c_size_t,
+                ctypes.c_ssize_t,
+            ]
+            send_message.restype = ctypes.c_ssize_t
+        release_capture()
+        send_message(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+        return True
+    except (AttributeError, OSError, TypeError):  # pragma: no cover - depends on Windows support.
         return False
 
 
@@ -454,6 +484,9 @@ class TerminalPatcherUi:
 
     def _begin_window_drag(self, event) -> None:
         if self._maximized:
+            return
+        self._drag_offset = None
+        if os.name == "nt" and begin_native_window_drag(_top_level_hwnd(self.root)):
             return
         self._drag_offset = (
             event.x_root - self.root.winfo_x(),

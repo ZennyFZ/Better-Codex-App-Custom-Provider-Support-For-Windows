@@ -233,6 +233,26 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(calls, ["apply", "apply"])
         self.assertEqual(root.actions, ["lift", "focus_force"])
 
+    def test_native_window_drag_uses_windows_move_loop(self):
+        from patch_chatgpt_providers_windows_gui import (
+            HTCAPTION,
+            WM_NCLBUTTONDOWN,
+            begin_native_window_drag,
+        )
+
+        calls = []
+        self.assertTrue(
+            begin_native_window_drag(
+                123,
+                release_capture=lambda: calls.append(("release",)),
+                send_message=lambda *args: calls.append(args),
+            )
+        )
+        self.assertEqual(
+            calls,
+            [("release",), (123, WM_NCLBUTTONDOWN, HTCAPTION, 0)],
+        )
+
     def test_audio_player_reports_missing_media_without_playing(self):
         from windows_audio import AudioError, MciAudioPlayer
 
