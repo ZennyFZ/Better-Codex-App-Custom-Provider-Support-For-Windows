@@ -143,6 +143,18 @@ def apply_classic_title_bar(root, set_attribute=None) -> bool:
     return bool(set_attribute(hwnd, 20, 1))
 
 
+def schedule_classic_title_bar(root, apply=apply_classic_title_bar) -> None:
+    """Apply the title-bar style again after Tk has mapped the top-level window."""
+    apply(root)
+
+    def apply_after_realize() -> None:
+        root.lift()
+        root.focus_force()
+        apply(root)
+
+    root.after_idle(apply_after_realize)
+
+
 class TerminalPatcherUi:
     """A small Tkinter front end that keeps patching off the UI thread."""
 
@@ -165,7 +177,7 @@ class TerminalPatcherUi:
         self.root.minsize(560, 360)
         self.root.configure(bg=spec["background"])
         self.root.update_idletasks()
-        apply_classic_title_bar(self.root)
+        schedule_classic_title_bar(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self._close_window)
 
         self._default_paths = codex_config.default_config_paths()

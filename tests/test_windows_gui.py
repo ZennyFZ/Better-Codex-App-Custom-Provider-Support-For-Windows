@@ -182,6 +182,34 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertTrue(apply_classic_title_bar(FakeRoot(), set_attribute=set_attribute))
         self.assertEqual([attribute for _hwnd, attribute, _color in calls], [35, 36, 20])
 
+    def test_title_bar_is_reapplied_after_tk_window_is_realized(self):
+        from patch_chatgpt_providers_windows_gui import schedule_classic_title_bar
+
+        class FakeRoot:
+            def __init__(self):
+                self.callback = None
+                self.actions = []
+
+            def after_idle(self, callback):
+                self.callback = callback
+
+            def lift(self):
+                self.actions.append("lift")
+
+            def focus_force(self):
+                self.actions.append("focus_force")
+
+        root = FakeRoot()
+        calls = []
+
+        schedule_classic_title_bar(root, apply=lambda _root: calls.append("apply"))
+
+        self.assertEqual(calls, ["apply"])
+        self.assertIsNotNone(root.callback)
+        root.callback()
+        self.assertEqual(calls, ["apply", "apply"])
+        self.assertEqual(root.actions, ["lift", "focus_force"])
+
     def test_audio_player_reports_missing_media_without_playing(self):
         from windows_audio import AudioError, MciAudioPlayer
 
