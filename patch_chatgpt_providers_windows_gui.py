@@ -51,8 +51,6 @@ SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
 SWP_FRAMECHANGED = 0x0020
-WM_NCLBUTTONDOWN = 0x00A1
-HTCAPTION = 2
 
 BUILTIN_MENU_PROVIDER = {
     "id": "openai",
@@ -63,6 +61,11 @@ BUILTIN_MENU_PROVIDER = {
 
 def format_log_line(level: str, message: str) -> str:
     return f"[{level.upper()}] {message}"
+
+
+def format_drag_position(x: int, y: int) -> str:
+    """Build a position-only update so Tk keeps its current size."""
+    return f"+{int(x)}+{int(y)}"
 
 
 def build_classic_ui_spec() -> dict[str, Any]:
@@ -174,34 +177,6 @@ def hide_native_title_bar(root) -> bool:
             )
         )
     except (AttributeError, OSError):  # pragma: no cover - depends on Windows support.
-        return False
-
-
-def begin_native_window_drag(
-    hwnd: int,
-    release_capture=None,
-    send_message=None,
-) -> bool:
-    """Ask Windows to run its native move loop for the custom header."""
-    try:
-        user32 = ctypes.windll.user32
-        if release_capture is None:
-            release_capture = user32.ReleaseCapture
-            release_capture.argtypes = []
-            release_capture.restype = ctypes.c_int
-        if send_message is None:
-            send_message = user32.SendMessageW
-            send_message.argtypes = [
-                ctypes.c_void_p,
-                ctypes.c_uint,
-                ctypes.c_size_t,
-                ctypes.c_ssize_t,
-            ]
-            send_message.restype = ctypes.c_ssize_t
-        release_capture()
-        send_message(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
-        return True
-    except (AttributeError, OSError, TypeError):  # pragma: no cover - depends on Windows support.
         return False
 
 
@@ -323,6 +298,8 @@ class TerminalPatcherUi:
         self._maximized = False
         self._normal_geometry: Optional[str] = None
         self._drag_offset: Optional[tuple[int, int]] = None
+        self._drag_pending: Optional[tuple[int, int]] = None
+        self._drag_after_id: Optional[str] = None
 
         self._build_widgets()
         self.root.after(100, self._drain_events)
@@ -470,6 +447,8 @@ class TerminalPatcherUi:
         self.root.iconify()
 
     def _toggle_maximize_window(self, _event=None) -> None:
+        self._cancel_pending_drag()
+        self._drag_offset = None
         if self._maximized:
             self.root.state("normal")
             if self._normal_geometry:
@@ -485,19 +464,39 @@ class TerminalPatcherUi:
     def _begin_window_drag(self, event) -> None:
         if self._maximized:
             return
-        self._drag_offset = None
-        if os.name == "nt" and begin_native_window_drag(_top_level_hwnd(self.root)):
-            return
+        self._cancel_pending_drag()
         self._drag_offset = (
-            event.x_root - self.root.winfo_x(),
-            event.y_root - self.root.winfo_y(),
+            event.x_root - self.root.winfo_rootx(),
+            event.y_root - self.root.winfo_rooty(),
         )
 
     def _drag_window(self, event) -> None:
         if self._maximized or self._drag_offset is None:
             return
         x_offset, y_offset = self._drag_offset
-        self.root.geometry(f"+{event.x_root - x_offset}+{event.y_root - y_offset}")
+        self._drag_pending = (
+            event.x_root - x_offset,
+            event.y_root - y_offset,
+        )
+        if self._drag_after_id is None:
+            self._drag_after_id = self.root.after(12, self._apply_drag_position)
+
+    def _apply_drag_position(self) -> None:
+        self._drag_after_id = None
+        pending = self._drag_pending
+        self._drag_pending = None
+        if pending is None or self._maximized:
+            return
+        self.root.geometry(format_drag_position(*pending))
+
+    def _cancel_pending_drag(self) -> None:
+        if self._drag_after_id is not None:
+            try:
+                self.root.after_cancel(self._drag_after_id)
+            except tk.TclError:
+                pass
+            self._drag_after_id = None
+        self._drag_pending = None
 
     def _layout_footer(self, _event=None) -> None:
         """Wrap the action group at compact widths instead of clipping buttons."""
@@ -1647,6 +1646,7 @@ class TerminalPatcherUi:
             messagebox.showwarning("Task running", "Wait for the current check or patch to finish.")
             return
         try:
+            self._cancel_pending_drag()
             try:
                 codex_config.save_gui_settings(
                     self._settings_path,
