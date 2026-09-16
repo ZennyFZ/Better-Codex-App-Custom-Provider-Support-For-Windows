@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import hashlib
 import json
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -45,6 +46,83 @@ class PortableLayoutTests(unittest.TestCase):
 
             with self.assertRaises(PatchError):
                 locate_portable_app(root)
+
+
+class PortableDownloadTests(unittest.TestCase):
+    def test_download_streams_the_official_msix_to_a_temporary_file(self):
+        from windows_download import PORTABLE_DOWNLOAD_URL, download_msix
+
+        class FakeResponse:
+            headers = {"Content-Length": "11"}
+
+            def __init__(self):
+                self.chunks = [b"hello ", b"world", b""]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _size):
+                return self.chunks.pop(0)
+
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch(
+                "windows_download.urllib.request.urlopen",
+                return_value=FakeResponse(),
+            ) as opener:
+                package = download_msix(Path(temp))
+
+            self.assertEqual(package.read_bytes(), b"hello world")
+            request = opener.call_args.args[0]
+            self.assertEqual(request.full_url, PORTABLE_DOWNLOAD_URL)
+            package.unlink()
+
+    def test_extracts_msix_zip_into_a_portable_folder(self):
+        from windows_download import extract_msix
+
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            msix = workspace / "ChatGPT-x64.msix"
+            with zipfile.ZipFile(msix, "w") as archive:
+                archive.writestr("app/ChatGPT.exe", b"MZ")
+                archive.writestr("app/resources/app.asar", b"asar")
+                archive.writestr("app/resources/app.asar.unpacked/", b"")
+
+            portable_root = extract_msix(msix, workspace)
+
+            self.assertEqual(portable_root.name, "ChatGPT-x64-portable")
+            self.assertEqual((portable_root / "app/ChatGPT.exe").read_bytes(), b"MZ")
+            self.assertTrue((portable_root / "app/resources/app.asar.unpacked").is_dir())
+
+    def test_rejects_zip_slip_entries_before_extracting(self):
+        from windows_download import DownloadError, extract_msix
+
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            msix = workspace / "malicious.msix"
+            with zipfile.ZipFile(msix, "w") as archive:
+                archive.writestr("../outside.txt", b"must not escape")
+
+            with self.assertRaises(DownloadError):
+                extract_msix(msix, workspace)
+
+            self.assertFalse((workspace.parent / "outside.txt").exists())
+
+    def test_rejects_a_valid_zip_without_a_portable_chatgpt_layout(self):
+        from windows_download import DownloadError, extract_msix
+
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            msix = workspace / "not-chatgpt.msix"
+            with zipfile.ZipFile(msix, "w") as archive:
+                archive.writestr("readme.txt", b"not a portable app")
+
+            with self.assertRaises(DownloadError):
+                extract_msix(msix, workspace)
+
+            self.assertFalse((workspace / "ChatGPT-x64-portable").exists())
 
 
 class ProcessAndBackupTests(unittest.TestCase):

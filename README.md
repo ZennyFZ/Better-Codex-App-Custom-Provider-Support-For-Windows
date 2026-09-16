@@ -136,13 +136,19 @@ never installs or launches `ChatGPT.exe`.
 First run:
 
 1. Double-click `launch_windows_portable_patcher.bat`.
-2. Edit these files manually if needed:
+2. Optionally click `DOWNLOAD`, choose a destination folder, and wait for the
+   MSIX to be downloaded and extracted as `ChatGPT-x64-portable`. This is a
+   portable extraction only; Windows AppX is not installed or registered.
+3. Edit these files manually if needed:
    `%USERPROFILE%\.codex\config.toml`,
    `%USERPROFILE%\.codex\desktop-model-providers.json`, and
    `%USERPROFILE%\.codex\model-catalogs\custom.json`.
-3. In the GUI, choose the extracted portable root and click `CHECK ONLY`.
-4. Close portable ChatGPT, then click `PATCH`. The GUI creates a backup and
+4. In the GUI, choose the extracted portable root and click `CHECK ONLY`.
+5. Close portable ChatGPT, then click `PATCH`. The GUI creates a backup and
    changes only the portable app's `app.asar`.
+
+The optional `AUDIO: OFF` button plays the first `.mp3` or `.wav` file beside
+the GUI in `media`. Audio is always off when the GUI starts.
 
 `plaintext` authentication is available for providers that require a direct
 bearer token, but it is experimental/insecure. Configure it manually in

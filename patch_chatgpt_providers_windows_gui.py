@@ -17,6 +17,8 @@ from windows_portable import (
     locate_portable_app,
     patch_portable_app,
 )
+from windows_audio import AudioError, MciAudioPlayer
+from windows_download import PORTABLE_DOWNLOAD_URL, download_and_extract_portable
 
 try:
     import tkinter as tk
@@ -57,11 +59,13 @@ def build_classic_ui_spec() -> dict[str, Any]:
         "geometry": "620x460",
         "background": CLASSIC_BG,
         "fields": ("Portable root (required):", "Backup directory (optional):"),
-        "buttons": ("CHECK ONLY", "PATCH", "CLEAR LOG"),
+        "buttons": ("AUDIO: OFF", "DOWNLOAD", "CHECK ONLY", "PATCH", "CLEAR LOG"),
         "pages": ("Setup",),
-        "actions": ("CHECK ONLY", "PATCH"),
+        "actions": ("DOWNLOAD", "CHECK ONLY", "PATCH"),
         "visible_sections": ("Patch target", "Activity log"),
         "action_labels": {
+            "AUDIO": "AUDIO: OFF",
+            "DOWNLOAD": "DOWNLOAD",
             "CHECK ONLY": "CHECK ONLY",
             "PATCH": "PATCH",
         },
@@ -141,6 +145,7 @@ class TerminalPatcherUi:
         self._events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._worker: Optional[threading.Thread] = None
         self._running = False
+        self.audio_player = MciAudioPlayer(Path(__file__).resolve().parent / "media")
 
         self._build_widgets()
         self.root.after(100, self._drain_events)
@@ -200,11 +205,25 @@ class TerminalPatcherUi:
         footer = tk.Frame(outer, background=CLASSIC_BG)
         footer.grid(row=2, column=0, sticky="ew")
         labels = build_classic_ui_spec()["action_labels"]
-        self.clear_button = self._classic_button(footer, "CLEAR LOG", self._clear_log)
-        self.clear_button.pack(side="right", padx=(5, 0))
-        self.patch_button = self._classic_button(footer, labels["PATCH"], self._start_patch)
+        left_controls = tk.Frame(footer, background=CLASSIC_BG)
+        left_controls.pack(side="left")
+        right_controls = tk.Frame(footer, background=CLASSIC_BG)
+        right_controls.pack(side="right")
+        self.audio_button = self._classic_button(
+            left_controls, labels["AUDIO"], self._toggle_audio
+        )
+        self.audio_button.pack(side="left")
+        self.download_button = self._classic_button(
+            left_controls, labels["DOWNLOAD"], self._start_download
+        )
+        self.download_button.pack(side="left", padx=(5, 0))
+        self.clear_button = self._classic_button(right_controls, "CLEAR LOG", self._clear_log)
+        self.clear_button.pack(side="right")
+        self.patch_button = self._classic_button(right_controls, labels["PATCH"], self._start_patch)
         self.patch_button.pack(side="right", padx=(5, 0))
-        self.check_button = self._classic_button(footer, labels["CHECK ONLY"], self._start_check)
+        self.check_button = self._classic_button(
+            right_controls, labels["CHECK ONLY"], self._start_check
+        )
         self.check_button.pack(side="right", padx=(5, 0))
 
     def _show_page(self, page: str) -> None:
@@ -1172,6 +1191,22 @@ class TerminalPatcherUi:
     def _start_check(self) -> None:
         self._start_worker("check")
 
+    def _toggle_audio(self) -> None:
+        try:
+            enabled = self.audio_player.toggle()
+        except AudioError as exc:
+            self._write_log("ERROR", str(exc))
+            self.audio_button.configure(text="AUDIO: OFF")
+            return
+        self.audio_button.configure(text="AUDIO: ON" if enabled else "AUDIO: OFF")
+
+    def _start_download(self) -> None:
+        selected = filedialog.askdirectory(
+            title="Choose a folder for portable ChatGPT"
+        )
+        if selected:
+            self._start_worker("download", destination=Path(selected))
+
     def _start_patch(self) -> None:
         if not messagebox.askyesno(
             "Patch portable ChatGPT",
@@ -1182,24 +1217,29 @@ class TerminalPatcherUi:
             return
         self._start_worker("patch")
 
-    def _start_worker(self, action: str) -> None:
+    def _start_worker(self, action: str, destination: Optional[Path] = None) -> None:
         if self._running:
             return
         try:
-            if action not in {"check", "patch"}:
+            if action not in {"check", "patch", "download"}:
                 raise PatchError(f"Unsupported GUI action: {action}")
-            root, config, backup = self._paths()
+            if action == "download":
+                if destination is None:
+                    raise PatchError("Choose a destination folder for portable ChatGPT first")
+                root, config, backup = None, self._default_config_path, destination / "backups"
+            else:
+                root, config, backup = self._paths()
         except PatchError as exc:
             self._write_log("ERROR", str(exc))
             return
         self._running = True
         self._set_busy(True)
         self.status_var.set(
-            {"check": "CHECKING", "patch": "PATCHING"}[action]
+            {"check": "CHECKING", "patch": "PATCHING", "download": "DOWNLOADING"}[action]
         )
         self._worker = threading.Thread(
             target=self._worker_main,
-            args=(action, root, config, backup),
+            args=(action, root, config, backup, destination),
             daemon=True,
         )
         self._worker.start()
@@ -1210,8 +1250,20 @@ class TerminalPatcherUi:
         root: Optional[Path],
         config: Path,
         backup: Path,
+        destination: Optional[Path] = None,
     ) -> None:
         try:
+            if action == "download":
+                if destination is None:
+                    raise PatchError("Choose a destination folder for portable ChatGPT first")
+                self._events.put(("log", ("SCAN", "Downloading ChatGPT-x64.msix...")))
+                portable_root = download_and_extract_portable(
+                    destination,
+                    url=PORTABLE_DOWNLOAD_URL,
+                )
+                self._events.put(("downloaded", portable_root))
+                self._events.put(("log", ("OK", f"Portable folder ready: {portable_root}")))
+                return
             if root is None:
                 raise PatchError("Choose the extracted portable root first")
             self._events.put(("log", ("SCAN", f"Portable root: {root}")))
@@ -1244,6 +1296,8 @@ class TerminalPatcherUi:
         self.check_button.configure(state=state)
         self.patch_button.configure(state=state)
         self.clear_button.configure(state=state)
+        self.download_button.configure(state=state)
+        self.audio_button.configure(state=state)
         for button in getattr(self, "page_buttons", {}).values():
             button.configure(state=state)
 
@@ -1258,6 +1312,10 @@ class TerminalPatcherUi:
                     self._load_configuration(payload)
                 elif kind == "saved":
                     self._write_log("OK", "Configuration files were written atomically; existing files were backed up.")
+                elif kind == "downloaded":
+                    portable_root = Path(payload)
+                    self.app_root_var.set(str(portable_root))
+                    self.backup_dir_var.set(str(portable_root / "backups"))
                 elif kind == "error":
                     self._write_log("ERROR", payload)
                     self.status_var.set("FAILED")
@@ -1277,20 +1335,25 @@ class TerminalPatcherUi:
             messagebox.showwarning("Task running", "Wait for the current check or patch to finish.")
             return
         try:
-            codex_config.save_gui_settings(
-                self._settings_path,
-                {
-                    "portable_root": self.app_root_var.get().strip(),
-                    "codex_home": self.codex_home_var.get().strip(),
-                    "config_toml": self.config_toml_var.get().strip(),
-                    "provider_menu": self.provider_menu_var.get().strip(),
-                    "model_catalog": self.model_catalog_var.get().strip(),
-                    "backup_dir": self.backup_dir_var.get().strip(),
-                },
-            )
-        except PatchError as exc:
-            self._write_log("ERROR", str(exc))
-        self.root.destroy()
+            try:
+                codex_config.save_gui_settings(
+                    self._settings_path,
+                    {
+                        "portable_root": self.app_root_var.get().strip(),
+                        "codex_home": self.codex_home_var.get().strip(),
+                        "config_toml": self.config_toml_var.get().strip(),
+                        "provider_menu": self.provider_menu_var.get().strip(),
+                        "model_catalog": self.model_catalog_var.get().strip(),
+                        "backup_dir": self.backup_dir_var.get().strip(),
+                    },
+                )
+            except PatchError as exc:
+                self._write_log("ERROR", str(exc))
+        finally:
+            try:
+                self.audio_player.close()
+            finally:
+                self.root.destroy()
 
     def run(self) -> None:
         self.root.mainloop()

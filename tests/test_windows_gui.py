@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from pathlib import Path
 
 
@@ -43,7 +44,10 @@ class WindowsGuiTests(unittest.TestCase):
             spec["fields"],
             ("Portable root (required):", "Backup directory (optional):"),
         )
-        self.assertEqual(spec["buttons"], ("CHECK ONLY", "PATCH", "CLEAR LOG"))
+        self.assertEqual(
+            spec["buttons"],
+            ("AUDIO: OFF", "DOWNLOAD", "CHECK ONLY", "PATCH", "CLEAR LOG"),
+        )
         self.assertEqual(spec["visible_sections"], ("Patch target", "Activity log"))
 
     def test_gui_spec_contains_configuration_pages(self):
@@ -52,7 +56,7 @@ class WindowsGuiTests(unittest.TestCase):
         spec = build_classic_ui_spec()
 
         self.assertEqual(spec["pages"], ("Setup",))
-        self.assertEqual(spec["actions"], ("CHECK ONLY", "PATCH"))
+        self.assertEqual(spec["actions"], ("DOWNLOAD", "CHECK ONLY", "PATCH"))
 
     def test_gui_spec_is_patch_only(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
@@ -62,6 +66,8 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertEqual(
             spec["action_labels"],
             {
+                "AUDIO": "AUDIO: OFF",
+                "DOWNLOAD": "DOWNLOAD",
                 "CHECK ONLY": "CHECK ONLY",
                 "PATCH": "PATCH",
             },
@@ -90,7 +96,14 @@ class WindowsGuiTests(unittest.TestCase):
             ui.root.geometry("560x360")
             ui.root.update()
 
-            for button in (ui.check_button, ui.patch_button, ui.clear_button):
+            self.assertEqual(ui.audio_button.cget("text"), "AUDIO: OFF")
+            for button in (
+                ui.audio_button,
+                ui.download_button,
+                ui.check_button,
+                ui.patch_button,
+                ui.clear_button,
+            ):
                 self.assertTrue(button.winfo_ismapped())
                 self.assertLessEqual(
                     button.winfo_rooty() + button.winfo_height(),
@@ -102,6 +115,44 @@ class WindowsGuiTests(unittest.TestCase):
         finally:
             if ui is not None:
                 ui.root.destroy()
+
+    def test_audio_player_is_off_until_toggled(self):
+        from windows_audio import MciAudioPlayer
+
+        with tempfile.TemporaryDirectory() as temp:
+            media = Path(temp) / "media"
+            media.mkdir()
+            track = media / "theme.mp3"
+            track.write_bytes(b"fake mp3")
+            commands = []
+
+            player = MciAudioPlayer(media, send_command=lambda command: commands.append(command) or 0)
+
+            self.assertFalse(player.enabled)
+            self.assertTrue(player.toggle())
+            self.assertTrue(player.enabled)
+            self.assertIn('open "', commands[0])
+            self.assertIn("play better_codex_audio repeat", commands[1])
+
+            self.assertFalse(player.toggle())
+            self.assertFalse(player.enabled)
+            self.assertEqual(commands[-2:], ["stop better_codex_audio", "close better_codex_audio"])
+
+    def test_audio_player_reports_missing_media_without_playing(self):
+        from windows_audio import AudioError, MciAudioPlayer
+
+        with tempfile.TemporaryDirectory() as temp:
+            commands = []
+            player = MciAudioPlayer(
+                Path(temp),
+                send_command=lambda command: commands.append(command) or 0,
+            )
+
+            with self.assertRaises(AudioError):
+                player.toggle()
+
+            self.assertFalse(player.enabled)
+            self.assertEqual(commands, [])
 
 
 if __name__ == "__main__":
