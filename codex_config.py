@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass
 import re
@@ -277,6 +278,151 @@ def credential_summary(provider: dict[str, Any]) -> str:
     if mode == "plaintext":
         return "plaintext bearer token"
     return "no credentials"
+
+
+def load_provider_menu(path: Path) -> dict[str, Any]:
+    data = load_json(path)
+    providers = data.get("providers", [])
+    configured_ids = {
+        provider.get("id")
+        for provider in providers
+        if isinstance(provider, dict)
+    }
+    validate_provider_menu(data, configured_ids)
+    return data
+
+
+def load_model_catalog(path: Path) -> dict[str, Any]:
+    data = load_json(path)
+    validate_model_catalog(data)
+    return data
+
+
+def _validate_model_edit_record(model: dict[str, Any]) -> None:
+    if not isinstance(model, dict):
+        raise PatchError("Every catalog model must be an object")
+    for field in ("slug", "display_name", "description", "provider"):
+        _require_non_empty_string(
+            model.get(field),
+            f"Model field '{field}' must be a non-empty string",
+        )
+
+
+def clone_model_template(
+    catalog: dict[str, Any],
+    template_slug: str,
+    new_slug: str,
+    display_name: str,
+    description: str,
+) -> dict[str, Any]:
+    validate_model_catalog(catalog)
+    template_slug = _require_non_empty_string(template_slug, "Template slug is required")
+    new_slug = _require_non_empty_string(new_slug, "New model slug is required")
+    display_name = _require_non_empty_string(display_name, "Model display name is required")
+    if not isinstance(description, str):
+        raise PatchError("Model description must be a string")
+    source = next(
+        (model for model in catalog["models"] if model.get("slug") == template_slug),
+        None,
+    )
+    if source is None:
+        raise PatchError(f"Model template not found: {template_slug}")
+    if new_slug != template_slug and any(model.get("slug") == new_slug for model in catalog["models"]):
+        raise PatchError(f"Model slug already exists: {new_slug}")
+    result = copy.deepcopy(source)
+    result.update(
+        {
+            "slug": new_slug,
+            "display_name": display_name,
+            "description": description,
+        }
+    )
+    return result
+
+
+def upsert_model(catalog: dict[str, Any], model: dict[str, Any]) -> dict[str, Any]:
+    validate_model_catalog(catalog)
+    _validate_model_edit_record(model)
+    result = copy.deepcopy(catalog)
+    replacement = copy.deepcopy(model)
+    for index, existing in enumerate(result["models"]):
+        if existing.get("slug") == replacement["slug"]:
+            result["models"][index] = replacement
+            return result
+    result["models"].append(replacement)
+    return result
+
+
+def remove_model(catalog: dict[str, Any], slug: str) -> dict[str, Any]:
+    validate_model_catalog(catalog)
+    slug = _require_non_empty_string(slug, "Model slug is required")
+    result = copy.deepcopy(catalog)
+    original_count = len(result["models"])
+    result["models"] = [model for model in result["models"] if model.get("slug") != slug]
+    if len(result["models"]) == original_count:
+        raise PatchError(f"Model not found: {slug}")
+    if not result["models"]:
+        raise PatchError("Model catalog must contain at least one model")
+    return result
+
+
+def build_provider_menu(
+    providers: list[dict[str, Any]],
+    default_provider: str,
+    mappings: dict[str, str],
+) -> dict[str, Any]:
+    if not isinstance(providers, list) or not providers:
+        raise PatchError("At least one provider is required for the provider menu")
+    if not isinstance(mappings, dict):
+        raise PatchError("Model-to-provider mappings must be an object")
+    menu_providers = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            raise PatchError("Every provider must be an object")
+        provider_id = _require_non_empty_string(
+            provider.get("id"),
+            "Every provider id must be a non-empty string",
+        )
+        label = _require_non_empty_string(
+            provider.get("label") or provider.get("name"),
+            f"Provider '{provider_id}' needs a menu label",
+        )
+        description = provider.get("description", "")
+        if not isinstance(description, str):
+            raise PatchError(f"Provider '{provider_id}' description must be a string")
+        menu_providers.append(
+            {"id": provider_id, "label": label, "description": description}
+        )
+    result = {
+        "version": 1,
+        "default_provider": default_provider,
+        "providers": menu_providers,
+        "model_providers": dict(mappings),
+    }
+    validate_provider_menu(result, {provider["id"] for provider in menu_providers})
+    return result
+
+
+def seed_catalog_from_codex(codex_executable: str = "codex") -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            [codex_executable, "debug", "models", "--bundled"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError as exc:
+        raise PatchError(f"Codex CLI executable was not found: {codex_executable}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise PatchError(f"Codex CLI could not seed the model catalog (exit code {exc.returncode})") from exc
+    except OSError as exc:
+        raise PatchError(f"Cannot run Codex CLI {codex_executable}: {exc}") from exc
+    try:
+        catalog = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise PatchError("Codex CLI returned invalid model catalog JSON") from exc
+    validate_model_catalog(catalog)
+    return catalog
 
 
 def serialize_toml_string(value: str) -> str:

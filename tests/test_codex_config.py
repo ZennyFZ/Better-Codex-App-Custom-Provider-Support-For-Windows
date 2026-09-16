@@ -202,5 +202,87 @@ class CredentialTests(unittest.TestCase):
             validate_credential_mode({"auth_mode": "plaintext", "token": ""})
 
 
+class CatalogMenuTests(unittest.TestCase):
+    def test_clone_model_template_preserves_advanced_metadata(self):
+        from codex_config import clone_model_template
+
+        catalog = {
+            "models": [
+                {
+                    "slug": "template",
+                    "display_name": "Template",
+                    "description": "Template description",
+                    "supported_reasoning_levels": [
+                        {"effort": "medium", "description": "Balanced"}
+                    ],
+                    "visibility": "list",
+                }
+            ]
+        }
+
+        result = clone_model_template(
+            catalog,
+            "template",
+            "provider/model",
+            "Provider Model",
+            "Custom model",
+        )
+
+        self.assertEqual(result["slug"], "provider/model")
+        self.assertEqual(result["display_name"], "Provider Model")
+        self.assertEqual(
+            result["supported_reasoning_levels"],
+            catalog["models"][0]["supported_reasoning_levels"],
+        )
+        self.assertNotEqual(result, catalog["models"][0])
+
+    def test_provider_menu_builder_maps_models_to_existing_provider(self):
+        from codex_config import build_provider_menu
+
+        result = build_provider_menu(
+            [
+                {"id": "openai", "label": "OpenAI", "description": ""},
+                {"id": "custom", "label": "Custom", "description": ""},
+            ],
+            "openai",
+            {"provider/model": "custom"},
+        )
+
+        self.assertEqual(result["default_provider"], "openai")
+        self.assertEqual(
+            result["model_providers"],
+            {"provider/model": "custom"},
+        )
+        self.assertNotIn("token", json.dumps(result))
+
+    def test_upsert_and_remove_model_keep_catalog_metadata(self):
+        from codex_config import remove_model, upsert_model
+
+        catalog = {
+            "catalog_version": 2,
+            "models": [
+                {
+                    "slug": "old",
+                    "display_name": "Old",
+                    "description": "Old",
+                    "vendor_metadata": {"keep": True},
+                }
+            ],
+        }
+        updated = upsert_model(
+            catalog,
+            {
+                "slug": "new",
+                "display_name": "New",
+                "description": "New",
+                "provider": "custom",
+            },
+        )
+        self.assertEqual(updated["catalog_version"], 2)
+        self.assertEqual(len(updated["models"]), 2)
+        self.assertEqual(remove_model(updated, "old")["models"][0]["slug"], "new")
+        self.assertEqual(catalog["models"][0]["slug"], "old")
+
+
 if __name__ == "__main__":
     unittest.main()
