@@ -60,6 +60,26 @@ def build_classic_ui_spec() -> dict[str, Any]:
         "buttons": ("CHECK ONLY", "PATCH", "CLEAR LOG"),
         "pages": ("Setup", "Models", "Provider menu"),
         "actions": ("LOAD", "SAVE", "VALIDATE", "CHECK ONLY", "PATCH"),
+        "action_labels": {
+            "LOAD": "LOAD CONFIG",
+            "SAVE": "SAVE CONFIG",
+            "VALIDATE": "VALIDATE",
+            "CHECK ONLY": "CHECK ONLY",
+            "PATCH": "PATCH",
+        },
+        "workflow_steps": (
+            "1. Choose the extracted portable root",
+            "2. LOAD CONFIG to read the current settings",
+            "3. Configure providers, models, and provider menu",
+            "4. SAVE CONFIG, then VALIDATE",
+            "5. CHECK ONLY, then PATCH",
+        ),
+        "next_action": "Choose Portable root, then click LOAD CONFIG.",
+        "page_help": {
+            "Setup": "Step 1 of 3: choose the portable folder and configure providers.",
+            "Models": "Step 2 of 3: add models and assign each model to a provider.",
+            "Provider menu": "Step 3 of 3: choose which providers appear in Codex.",
+        },
         "plaintext_warning": (
             "Plaintext bearer tokens are experimental and insecure; "
             "use an environment variable when possible."
@@ -136,13 +156,15 @@ class TerminalPatcherUi:
         self.root_updates: dict[str, Any] = {}
         self._page = "Setup"
         self.status_var = tk.StringVar(value="READY")
+        self.next_action_var = tk.StringVar(value=spec["next_action"])
         self._events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._worker: Optional[threading.Thread] = None
         self._running = False
 
         self._build_widgets()
         self.root.after(100, self._drain_events)
-        self._write_log("INFO", "Choose the extracted MSIX folder, then click CHECK ONLY.")
+        self._write_log("INFO", "Start here: choose Portable root, then click LOAD CONFIG.")
+        self._write_log("INFO", "Follow the order shown above: configure, save, validate, check, then patch.")
         self._write_log("INFO", "The installed MSIX is never changed or launched.")
 
     def _build_widgets(self) -> None:
@@ -167,11 +189,44 @@ class TerminalPatcherUi:
             font=("Segoe UI", 8),
         ).pack(fill="x", pady=(0, 6))
 
+        guide = self._label_frame(outer, "How to use (follow this order)")
+        guide.pack(fill="x", pady=(0, 6))
+        workflow = "  ->  ".join(build_classic_ui_spec()["workflow_steps"])
+        tk.Label(
+            guide,
+            text=workflow,
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_TEXT,
+            justify="left",
+            anchor="w",
+            wraplength=585,
+            font=("Segoe UI", 8),
+        ).pack(fill="x")
+        tk.Label(
+            guide,
+            textvariable=self.next_action_var,
+            background=CLASSIC_FIELD,
+            foreground=CLASSIC_YELLOW,
+            justify="left",
+            anchor="w",
+            padx=5,
+            pady=3,
+            font=("Segoe UI", 8, "bold"),
+        ).pack(fill="x", pady=(4, 0))
+
         page_bar = tk.Frame(outer, background=CLASSIC_BG)
         page_bar.pack(fill="x", pady=(0, 5))
+        tk.Label(
+            page_bar,
+            text="Configure by step:",
+            background=CLASSIC_BG,
+            foreground=CLASSIC_MUTED,
+            anchor="w",
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(0, 6))
         self.page_buttons: dict[str, Any] = {}
-        for page in build_classic_ui_spec()["pages"]:
-            button = self._classic_button(page_bar, page, lambda value=page: self._show_page(value))
+        for index, page in enumerate(build_classic_ui_spec()["pages"], start=1):
+            button = self._classic_button(page_bar, f"{index}. {page}", lambda value=page: self._show_page(value))
             button.pack(side="left", padx=(0, 5))
             self.page_buttons[page] = button
 
@@ -228,18 +283,27 @@ class TerminalPatcherUi:
             foreground=CLASSIC_MUTED,
             anchor="w",
             font=("Segoe UI", 8),
+        ).pack(side="left", padx=(0, 8))
+        tk.Label(
+            footer,
+            textvariable=self.next_action_var,
+            background=CLASSIC_BG,
+            foreground=CLASSIC_CYAN,
+            anchor="w",
+            font=("Segoe UI", 8),
         ).pack(side="left", fill="x", expand=True)
+        labels = build_classic_ui_spec()["action_labels"]
         self.clear_button = self._classic_button(footer, "CLEAR LOG", self._clear_log)
         self.clear_button.pack(side="right", padx=(5, 0))
-        self.patch_button = self._classic_button(footer, "PATCH", self._start_patch)
+        self.patch_button = self._classic_button(footer, labels["PATCH"], self._start_patch)
         self.patch_button.pack(side="right", padx=(5, 0))
-        self.check_button = self._classic_button(footer, "CHECK ONLY", self._start_check)
+        self.check_button = self._classic_button(footer, labels["CHECK ONLY"], self._start_check)
         self.check_button.pack(side="right", padx=(5, 0))
-        self.validate_button = self._classic_button(footer, "VALIDATE", self._start_validate)
+        self.validate_button = self._classic_button(footer, labels["VALIDATE"], self._start_validate)
         self.validate_button.pack(side="right", padx=(5, 0))
-        self.save_button = self._classic_button(footer, "SAVE", self._start_save)
+        self.save_button = self._classic_button(footer, labels["SAVE"], self._start_save)
         self.save_button.pack(side="right", padx=(5, 0))
-        self.load_button = self._classic_button(footer, "LOAD", self._start_load)
+        self.load_button = self._classic_button(footer, labels["LOAD"], self._start_load)
         self.load_button.pack(side="right")
 
     def _show_page(self, page: str) -> None:
@@ -260,6 +324,17 @@ class TerminalPatcherUi:
             self._build_models_page()
         else:
             self._build_provider_menu_page()
+
+    def _page_intro(self, parent, page: str) -> None:
+        tk.Label(
+            parent,
+            text=build_classic_ui_spec()["page_help"][page],
+            background=CLASSIC_BG,
+            foreground=CLASSIC_CYAN,
+            justify="left",
+            anchor="w",
+            font=("Segoe UI", 8, "bold"),
+        ).pack(fill="x", pady=(0, 5))
 
     def _label_frame(self, parent, title: str):
         return tk.LabelFrame(
@@ -325,29 +400,40 @@ class TerminalPatcherUi:
         page = tk.Frame(self.page_frame, background=CLASSIC_BG)
         page.pack(fill="both", expand=True)
 
-        locations = self._label_frame(page, "Locations (advanced)")
+        self._page_intro(page, "Setup")
+        locations = self._label_frame(page, "Step 1 - Portable folder and files")
         locations.pack(fill="x", pady=(0, 6))
+        tk.Label(
+            locations,
+            text="Portable root is required for CHECK ONLY and PATCH. The other paths are filled automatically; leave them unchanged unless needed.",
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=580,
+            font=("Segoe UI", 8),
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 6))
         locations.columnconfigure(0, weight=1)
         self.app_root_entry, self.app_root_browse = self._path_row(
-            locations, 0, "Portable root:", self.app_root_var, self._browse_root
+            locations, 1, "Portable root:", self.app_root_var, self._browse_root
         )
         self.codex_home_entry, self.codex_home_browse = self._path_row(
-            locations, 1, "Codex home:", self.codex_home_var, self._browse_codex_home
+            locations, 2, "Codex home:", self.codex_home_var, self._browse_codex_home
         )
         self.config_toml_entry, self.config_toml_browse = self._path_row(
-            locations, 2, "config.toml:", self.config_toml_var, self._browse_config_toml
+            locations, 3, "config.toml:", self.config_toml_var, self._browse_config_toml
         )
         self.config_entry, self.config_browse = self._path_row(
-            locations, 3, "Provider menu JSON:", self.provider_menu_var, self._browse_config
+            locations, 4, "Provider menu JSON:", self.provider_menu_var, self._browse_config
         )
         self.model_catalog_entry, self.model_catalog_browse = self._path_row(
-            locations, 4, "Model catalog JSON:", self.model_catalog_var, self._browse_model_catalog
+            locations, 5, "Model catalog JSON:", self.model_catalog_var, self._browse_model_catalog
         )
         self.backup_entry, self.backup_browse = self._path_row(
-            locations, 5, "Backup directory:", self.backup_dir_var, self._browse_backup
+            locations, 6, "Backup directory:", self.backup_dir_var, self._browse_backup
         )
 
-        providers_frame = self._label_frame(page, "Providers")
+        providers_frame = self._label_frame(page, "Step 1 continued - Providers")
         providers_frame.pack(fill="both", expand=True)
         providers_frame.columnconfigure(0, weight=1)
         providers_frame.columnconfigure(1, weight=2)
@@ -376,6 +462,17 @@ class TerminalPatcherUi:
         self._classic_button(provider_buttons, "ADD", self._add_provider).pack(side="left")
         self._classic_button(provider_buttons, "EDIT", self._edit_provider).pack(side="left", padx=4)
         self._classic_button(provider_buttons, "REMOVE", self._remove_provider).pack(side="left")
+        self.provider_hint_var = tk.StringVar()
+        tk.Label(
+            list_panel,
+            textvariable=self.provider_hint_var,
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=180,
+            font=("Segoe UI", 8),
+        ).grid(row=2, column=0, sticky="ew", pady=(5, 0))
 
         editor = self._label_frame(providers_frame, "Provider details")
         editor.grid(row=0, column=1, sticky="nsew")
@@ -457,9 +554,19 @@ class TerminalPatcherUi:
         page.pack(fill="both", expand=True)
         page.columnconfigure(0, weight=1)
         page.columnconfigure(1, weight=2)
-        page.rowconfigure(0, weight=1)
-        list_panel = self._label_frame(page, "Custom model catalog")
-        list_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        page.rowconfigure(1, weight=1)
+        intro = tk.Label(
+            page,
+            text=build_classic_ui_spec()["page_help"]["Models"],
+            background=CLASSIC_BG,
+            foreground=CLASSIC_CYAN,
+            justify="left",
+            anchor="w",
+            font=("Segoe UI", 8, "bold"),
+        )
+        intro.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        list_panel = self._label_frame(page, "Step 2 - Model catalog")
+        list_panel.grid(row=1, column=0, sticky="nsew", padx=(0, 7))
         list_panel.rowconfigure(0, weight=1)
         list_panel.columnconfigure(0, weight=1)
         self.model_listbox = tk.Listbox(
@@ -481,9 +588,20 @@ class TerminalPatcherUi:
         self._classic_button(model_buttons, "ADD", self._add_model).pack(side="left")
         self._classic_button(model_buttons, "EDIT", self._edit_model).pack(side="left", padx=4)
         self._classic_button(model_buttons, "REMOVE", self._remove_model).pack(side="left")
+        self.model_hint_var = tk.StringVar()
+        tk.Label(
+            list_panel,
+            textvariable=self.model_hint_var,
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=180,
+            font=("Segoe UI", 8),
+        ).grid(row=2, column=0, sticky="ew", pady=(5, 0))
 
         editor = self._label_frame(page, "Model details")
-        editor.grid(row=0, column=1, sticky="nsew")
+        editor.grid(row=1, column=1, sticky="nsew")
         editor.columnconfigure(1, weight=1)
         self.model_slug_var = tk.StringVar()
         self.model_display_var = tk.StringVar()
@@ -548,10 +666,20 @@ class TerminalPatcherUi:
         page.pack(fill="both", expand=True)
         page.columnconfigure(0, weight=1)
         page.columnconfigure(1, weight=1)
-        page.rowconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+        intro = tk.Label(
+            page,
+            text=build_classic_ui_spec()["page_help"]["Provider menu"],
+            background=CLASSIC_BG,
+            foreground=CLASSIC_CYAN,
+            justify="left",
+            anchor="w",
+            font=("Segoe UI", 8, "bold"),
+        )
+        intro.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
-        menu_frame = self._label_frame(page, "Patched provider menu")
-        menu_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
+        menu_frame = self._label_frame(page, "Step 3 - Providers shown in Codex")
+        menu_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 7))
         menu_frame.rowconfigure(0, weight=1)
         menu_frame.columnconfigure(0, weight=1)
         self.menu_provider_listbox = tk.Listbox(
@@ -573,9 +701,20 @@ class TerminalPatcherUi:
         self._classic_button(menu_buttons, "ADD SELECTED", self._add_menu_provider).pack(side="left")
         self._classic_button(menu_buttons, "APPLY LABEL", self._edit_menu_provider).pack(side="left", padx=4)
         self._classic_button(menu_buttons, "REMOVE", self._remove_menu_provider).pack(side="left")
+        self.menu_hint_var = tk.StringVar()
+        tk.Label(
+            menu_frame,
+            textvariable=self.menu_hint_var,
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=180,
+            font=("Segoe UI", 8),
+        ).grid(row=2, column=0, sticky="ew", pady=(5, 0))
 
         details = self._label_frame(page, "Menu settings")
-        details.grid(row=0, column=1, sticky="nsew")
+        details.grid(row=1, column=1, sticky="nsew")
         details.columnconfigure(1, weight=1)
         self.menu_label_var = tk.StringVar()
         self.menu_description_var = tk.StringVar()
@@ -626,6 +765,17 @@ class TerminalPatcherUi:
         self._classic_button(mapping_frame, "UPDATE MAPPING", self._update_provider_mapping).grid(
             row=3, column=0, columnspan=2, sticky="w", pady=(5, 0)
         )
+        self.mapping_hint_var = tk.StringVar()
+        tk.Label(
+            mapping_frame,
+            textvariable=self.mapping_hint_var,
+            background=CLASSIC_PANEL,
+            foreground=CLASSIC_MUTED,
+            justify="left",
+            anchor="w",
+            wraplength=270,
+            font=("Segoe UI", 8),
+        ).grid(row=4, column=0, columnspan=2, sticky="ew", pady=(5, 0))
         self._refresh_provider_menu_page()
 
     def _set_option_values(self, menu, variable, values) -> None:
@@ -680,9 +830,11 @@ class TerminalPatcherUi:
         for provider in self.providers:
             self.provider_listbox.insert("end", self._provider_display(provider))
         if self.providers:
+            self.provider_hint_var.set("Select a provider to edit. Use ADD to create another one.")
             self.provider_listbox.selection_set(0)
             self._fill_provider_form(self.providers[0])
         else:
+            self.provider_hint_var.set("No custom provider yet. LOAD CONFIG first, or use ADD.")
             self._clear_provider_form()
 
     def _on_provider_select(self, _event=None) -> None:
@@ -815,9 +967,11 @@ class TerminalPatcherUi:
         model_slugs = [model.get("slug", "") for model in self.model_catalog.get("models", [])]
         self._set_option_values(self.model_template_menu, self.model_template_var, [""] + model_slugs)
         if self.model_catalog.get("models"):
+            self.model_hint_var.set("Select a model to edit. Use ADD for a new model.")
             self.model_listbox.selection_set(0)
             self._fill_model_form(self.model_catalog["models"][0])
         else:
+            self.model_hint_var.set("No models loaded. Click LOAD CONFIG or add one with ADD.")
             self._clear_model_form()
 
     def _on_model_select(self, _event=None) -> None:
@@ -951,6 +1105,10 @@ class TerminalPatcherUi:
         self.menu_provider_listbox.delete(0, "end")
         for provider in menu_providers:
             self.menu_provider_listbox.insert("end", self._provider_display(provider))
+        if menu_providers:
+            self.menu_hint_var.set("Select a provider to change its label, or use ADD SELECTED.")
+        else:
+            self.menu_hint_var.set("The menu is empty. Add a configured provider from Setup.")
         provider_ids = self._all_provider_ids()
         self._set_option_values(self.default_provider_menu, self.default_provider_var, provider_ids)
         if self.provider_menu.get("default_provider") in provider_ids:
@@ -964,6 +1122,10 @@ class TerminalPatcherUi:
         self.mapping_listbox.delete(0, "end")
         for slug, provider_id in mappings.items():
             self.mapping_listbox.insert("end", f"{slug} -> {provider_id}")
+        if mappings:
+            self.mapping_hint_var.set("Select a model slug above, choose a provider, then UPDATE MAPPING.")
+        else:
+            self.mapping_hint_var.set("No automatic mappings yet. Add models first, then map them here.")
         if menu_providers:
             self.menu_provider_listbox.selection_set(0)
             self._fill_menu_provider_form(menu_providers[0])
@@ -1122,6 +1284,9 @@ class TerminalPatcherUi:
         self.log.insert("end", format_log_line(level, message) + "\n", level.upper())
         self.log.see("end")
         self.log.configure(state="disabled")
+
+    def _set_next_action(self, message: str) -> None:
+        self.next_action_var.set(message)
 
     def _configuration_paths(self) -> codex_config.ConfigPaths:
         codex_home = Path(self.codex_home_var.get().strip() or _default_codex_home()).expanduser()
@@ -1305,6 +1470,15 @@ class TerminalPatcherUi:
         self.status_var.set(
             {"load": "LOADING", "save": "SAVING", "validate": "VALIDATING", "check": "CHECKING", "patch": "PATCHING"}[action]
         )
+        self._set_next_action(
+            {
+                "load": "Working: reading the current configuration...",
+                "save": "Working: writing the configuration files...",
+                "validate": "Working: checking fields, paths, and mappings...",
+                "check": "Working: scanning the portable app without changing it...",
+                "patch": "Working: creating a backup and patching the portable app...",
+            }[action]
+        )
         self._worker = threading.Thread(
             target=self._worker_main,
             args=(action, root, paths, bundle),
@@ -1324,6 +1498,7 @@ class TerminalPatcherUi:
                 loaded = self._read_configuration(paths)
                 self._events.put(("loaded", loaded))
                 self._events.put(("log", ("OK", "Loaded Codex provider, model, and menu configuration.")))
+                self._events.put(("next", "Configuration loaded. Review the tabs, then click SAVE CONFIG."))
                 return
 
             if action == "validate":
@@ -1331,6 +1506,7 @@ class TerminalPatcherUi:
                     raise PatchError("Configuration bundle was not prepared")
                 codex_config.validate_configuration_bundle(bundle)
                 self._events.put(("log", ("OK", "Configuration fields, mappings, credentials, and paths are valid.")))
+                self._events.put(("next", "Configuration is valid. Click CHECK ONLY next."))
                 return
 
             if action == "save":
@@ -1341,6 +1517,7 @@ class TerminalPatcherUi:
                 self._events.put(("log", ("OK", f"Saved provider menu: {result.provider_menu}")))
                 self._events.put(("log", ("OK", f"Saved model catalog: {result.model_catalog}")))
                 self._events.put(("log", ("OK", f"Saved Codex TOML: {result.config_toml}")))
+                self._events.put(("next", "Configuration saved. Click VALIDATE next."))
                 return
 
             if root is None:
@@ -1357,6 +1534,7 @@ class TerminalPatcherUi:
             if action == "check":
                 patch_portable_app(app, paths.provider_menu, paths.backup_dir, check_only=True)
                 self._events.put(("log", ("OK", "Layout and current ASAR patch markers are compatible.")))
+                self._events.put(("next", "CHECK ONLY passed. Click PATCH when ready."))
                 return
 
             if bundle is None:
@@ -1367,6 +1545,7 @@ class TerminalPatcherUi:
             original_backup = patch_portable_app(app, paths.provider_menu, paths.backup_dir)
             self._events.put(("log", ("OK", f"Patch complete: {app.asar}")))
             self._events.put(("log", ("OK", f"Backup: {original_backup}")))
+            self._events.put(("next", "Patch complete. Launch the portable app to verify the provider menu."))
         except PatchError as exc:
             self._events.put(("error", str(exc)))
         except Exception as exc:  # Keep unexpected GUI-thread failures visible.
@@ -1382,6 +1561,8 @@ class TerminalPatcherUi:
         self.check_button.configure(state=state)
         self.patch_button.configure(state=state)
         self.clear_button.configure(state=state)
+        for button in getattr(self, "page_buttons", {}).values():
+            button.configure(state=state)
 
     def _drain_events(self) -> None:
         try:
@@ -1394,9 +1575,12 @@ class TerminalPatcherUi:
                     self._load_configuration(payload)
                 elif kind == "saved":
                     self._write_log("OK", "Configuration files were written atomically; existing files were backed up.")
+                elif kind == "next":
+                    self._set_next_action(payload)
                 elif kind == "error":
                     self._write_log("ERROR", payload)
                     self.status_var.set("FAILED")
+                    self._set_next_action("Fix the error in Activity log, then try again.")
                     messagebox.showerror("Portable patch failed", payload)
                 elif kind == "finished":
                     self._running = False

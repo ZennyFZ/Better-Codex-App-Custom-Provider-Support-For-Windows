@@ -56,6 +56,41 @@ class WindowsGuiTests(unittest.TestCase):
             ("LOAD", "SAVE", "VALIDATE", "CHECK ONLY", "PATCH"),
         )
 
+    def test_gui_spec_explains_the_first_run_workflow(self):
+        from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
+
+        spec = build_classic_ui_spec()
+
+        self.assertEqual(
+            spec["workflow_steps"],
+            (
+                "1. Choose the extracted portable root",
+                "2. LOAD CONFIG to read the current settings",
+                "3. Configure providers, models, and provider menu",
+                "4. SAVE CONFIG, then VALIDATE",
+                "5. CHECK ONLY, then PATCH",
+            ),
+        )
+        self.assertEqual(spec["next_action"], "Choose Portable root, then click LOAD CONFIG.")
+        self.assertEqual(
+            spec["action_labels"],
+            {
+                "LOAD": "LOAD CONFIG",
+                "SAVE": "SAVE CONFIG",
+                "VALIDATE": "VALIDATE",
+                "CHECK ONLY": "CHECK ONLY",
+                "PATCH": "PATCH",
+            },
+        )
+        self.assertEqual(
+            spec["page_help"],
+            {
+                "Setup": "Step 1 of 3: choose the portable folder and configure providers.",
+                "Models": "Step 2 of 3: add models and assign each model to a provider.",
+                "Provider menu": "Step 3 of 3: choose which providers appear in Codex.",
+            },
+        )
+
     def test_gui_spec_explains_plaintext_warning(self):
         from patch_chatgpt_providers_windows_gui import build_classic_ui_spec
 

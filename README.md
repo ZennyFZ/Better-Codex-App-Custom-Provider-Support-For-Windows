@@ -135,19 +135,20 @@ background thread and never installs or launches `ChatGPT.exe`.
 First run:
 
 1. Double-click `launch_windows_portable_patcher.bat`.
-2. On `Setup`, choose the extracted portable root. The default Codex paths
-   are shown under `Locations (advanced)` and can be changed there.
+2. Follow the `How to use` strip at the top: choose the extracted portable
+   root, then click `LOAD CONFIG`. The default Codex paths are shown under
+   `Step 1 - Portable folder and files`; normally they do not need editing.
 3. Add a provider. Choose `environment` to store only `env_key` in
    `config.toml`; optionally select the checkbox to save its value to the
    current Windows user's environment. Restart already-running apps after
    changing an environment variable.
-4. On `Models`, choose a template and add the model slug, display name,
+4. On `2. Models`, choose a template and add the model slug, display name,
    description, and provider. The advanced metadata is inherited from the
    template and can be adjusted in the form.
-5. On `Provider menu`, review labels, choose the default provider, and edit
-   Automatic model mappings.
-6. Click `SAVE`, then `VALIDATE`, then `CHECK ONLY`. Close portable ChatGPT
-   and click `PATCH`.
+5. On `3. Provider menu`, review labels, choose the default provider, and
+   edit `Automatic model mappings`.
+6. Click `SAVE CONFIG`, then `VALIDATE`, then `CHECK ONLY`. Close portable
+   ChatGPT and click `PATCH`.
 
 `plaintext` authentication is available for providers that require a direct
 bearer token, but it is experimental/insecure. The token field is masked and
