@@ -1,0 +1,15 @@
+# Local planning and reference documents
+/docs/
+
+# Local test suite (kept out of the portable release)
+/tests/
+
+# Python bytecode and test/tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local code-graph output
+/graphify-out/

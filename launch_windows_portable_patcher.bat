@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-set "GUI_SCRIPT=%SCRIPT_DIR%patch_chatgpt_providers_windows_gui.py"
+set "GUI_SCRIPT=%SCRIPT_DIR%app\patch_chatgpt_providers_windows_gui.py"
 cd /d "%SCRIPT_DIR%"
 
 if not exist "%GUI_SCRIPT%" (

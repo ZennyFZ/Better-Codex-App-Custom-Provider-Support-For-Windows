@@ -1,13 +1,11 @@
-"""Patch an extracted Windows ChatGPT MSIX as a portable application.
+"""Portable patching backend for the Windows ChatGPT GUI.
 
-This module deliberately handles the portable layout itself instead of
-importing the macOS installer.  It never installs an AppX package, changes an
-AppX signature, or starts ChatGPT.exe.
+It never installs an AppX package, changes an AppX signature, or starts
+ChatGPT.exe.
 """
 
 from __future__ import annotations
 
-import argparse
 import copy
 import datetime as dt
 import hashlib
@@ -19,7 +17,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
-from typing import Any, NamedTuple, Optional, Sequence, Union
+from typing import Any, NamedTuple, Optional, Union
 
 
 PATCH_MARKER = b"__codexDesktopModelProvidersPatchV3"
@@ -39,27 +37,6 @@ class PortableApp(NamedTuple):
     unpacked: Path
 
 
-DEFAULT_PROVIDER_CONFIG: dict[str, Any] = {
-    "version": 1,
-    "default_provider": "openai",
-    "providers": [
-        {
-            "id": "openai",
-            "label": "ChatGPT / OpenAI",
-            "description": "Built-in provider; uses your signed-in ChatGPT account",
-        },
-        {
-            "id": "openrouter",
-            "label": "OpenRouter",
-            "description": "Custom provider; uses [model_providers.openrouter] from config.toml",
-        },
-    ],
-    "model_providers": {
-        "moonshotai/kimi-k3": "openrouter",
-        "x-ai/grok-4.5": "openrouter",
-        "anthropic/claude-fable-5": "openrouter",
-    },
-}
 
 
 # The current Windows build (26.903.8094.0) uses fD for the app IPC request
@@ -132,75 +109,6 @@ def validate_portable_layout(app: PortableApp) -> None:
         raise PatchError(f"Missing ASAR companion directory: {app.unpacked}")
 
 
-def validate_provider_config(data: Any) -> None:
-    if not isinstance(data, dict):
-        raise PatchError("Provider config must be a JSON object")
-    if data.get("version") != 1:
-        raise PatchError("Provider config version must be 1")
-    providers = data.get("providers")
-    if not isinstance(providers, list) or not providers:
-        raise PatchError("Provider config 'providers' must be a non-empty array")
-    provider_ids: set[str] = set()
-    for provider in providers:
-        if not isinstance(provider, dict):
-            raise PatchError("Every provider must be an object")
-        provider_id = provider.get("id")
-        if not isinstance(provider_id, str) or not provider_id.strip():
-            raise PatchError("Every provider id must be a non-empty string")
-        provider_id = provider_id.strip()
-        if provider_id in provider_ids:
-            raise PatchError(f"Duplicate provider id: {provider_id}")
-        provider_ids.add(provider_id)
-        label = provider.get("label")
-        if not isinstance(label, str) or not label.strip():
-            raise PatchError(f"Provider '{provider_id}' needs a non-empty label")
-        if not isinstance(provider.get("description", ""), str):
-            raise PatchError(f"Provider '{provider_id}' description must be a string")
-    if data.get("default_provider") not in provider_ids:
-        raise PatchError("default_provider must reference a configured provider")
-    mappings = data.get("model_providers")
-    if not isinstance(mappings, dict):
-        raise PatchError("model_providers must be an object")
-    for model, provider_id in mappings.items():
-        if not isinstance(model, str) or not model.strip():
-            raise PatchError("Every model mapping key must be a non-empty string")
-        if provider_id not in provider_ids:
-            raise PatchError(
-                f"Model '{model}' references unknown provider '{provider_id}'"
-            )
-
-
-def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        try:
-            os.chmod(temporary_path, 0o600)
-        except OSError:
-            pass
-        os.replace(temporary_path, path)
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
-
-
-def ensure_provider_config(path: Path, overwrite: bool = False) -> str:
-    if overwrite or not path.exists() or path.stat().st_size == 0:
-        validate_provider_config(DEFAULT_PROVIDER_CONFIG)
-        atomic_write_json(path, DEFAULT_PROVIDER_CONFIG)
-        return "written"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise PatchError(f"Cannot read valid JSON from {path}: {exc}") from exc
-    validate_provider_config(data)
-    return "kept"
 
 
 def _portable_path_key(path: Path) -> str:
@@ -554,7 +462,7 @@ def _patch_picker_source(source: str) -> str:
     source = _replace_once(
         source,
         r"let\s+H\s*=\s*V\s*,\s*te\s*;",
-        "let H=(0,b7.jsx)(of.Fragment,{children:[(0,b7.jsx)(CodexCustomProviderPickerSection,{}),V]}),te;",
+        "let H=(0,b7.jsx)(b7.Fragment,{children:[(0,b7.jsx)(CodexCustomProviderPickerSection,{}),V]}),te;",
         "model-picker beforeModels",
     )
     return source
@@ -640,19 +548,11 @@ def _atomic_replace(source: Path, target: Path) -> None:
 
 def patch_portable_app(
     app: PortableApp,
-    config: Path,
     backup_dir: Path,
     allow_running: bool = False,
-    overwrite_config: bool = False,
     check_only: bool = False,
-    create_config: bool = True,
 ) -> Optional[Path]:
-    """Validate and patch a portable app; return the original ASAR backup.
-
-    ``create_config=False`` is used by the patch-only GUI. It leaves the
-    provider JSON entirely under the user's control instead of creating or
-    rewriting a default file during the archive patch.
-    """
+    """Validate and patch a portable app; return the original ASAR backup."""
 
     validate_portable_layout(app)
     running = find_windows_app_processes(app.root)
@@ -673,9 +573,6 @@ def patch_portable_app(
     if check_only:
         return None
 
-    if create_config:
-        config_action = ensure_provider_config(Path(config).expanduser(), overwrite_config)
-        del config_action  # The CLI reports config details; the patcher stays composable.
     backup = backup_portable_asar(app, Path(backup_dir).expanduser())
     temporary_archive = app.asar.with_name(f".{app.asar.name}.patched-{os.getpid()}")
     try:
@@ -693,47 +590,3 @@ def patch_portable_app(
             temporary_archive.unlink()
         raise
     return backup
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Patch an extracted Windows ChatGPT MSIX for custom provider routing."
-    )
-    parser.add_argument("--app-root", type=Path, required=True, help="Extracted MSIX root")
-    parser.add_argument("--config", type=Path, help="Provider-routing JSON file")
-    parser.add_argument("--backup-dir", type=Path, help="Directory for original ASAR backups")
-    parser.add_argument("--overwrite-config", action="store_true")
-    parser.add_argument("--allow-running", action="store_true")
-    parser.add_argument("--check-only", action="store_true", help="Validate without writing any file")
-    return parser
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        app = locate_portable_app(args.app_root)
-        codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
-        config = args.config or codex_home / "desktop-model-providers.json"
-        backup_dir = args.backup_dir or app.root / "backups"
-        backup = patch_portable_app(
-            app,
-            config,
-            backup_dir,
-            allow_running=args.allow_running,
-            overwrite_config=args.overwrite_config,
-            check_only=args.check_only,
-        )
-    except PatchError as exc:
-        print(f"ERROR: {exc}")
-        return 1
-    if args.check_only:
-        print(f"OK: portable layout and current ASAR patch markers are compatible: {app.root}")
-    else:
-        print(f"OK: patched portable ChatGPT ASAR: {app.asar}")
-        print(f"Backup: {backup}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
