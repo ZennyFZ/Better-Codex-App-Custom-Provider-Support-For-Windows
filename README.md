@@ -35,6 +35,16 @@ Node.js is not required.
 The extracted folder is named `ChatGPT-x64-portable`; a numeric suffix is used
 if that folder already exists.
 
+If Codex is already installed and you have permission to read `WindowsApps`,
+you can skip `DOWNLOAD` and choose the installed package folder directly:
+
+```text
+%ProgramFiles%\WindowsApps\OpenAI.Codex_26.908.9136.0_x64__2p2nqsd0c76g0
+```
+
+`WindowsApps` is normally protected by Windows. If the folder cannot be
+opened or selected, use the download/extract method instead.
+
 The portable root should look like this:
 
 ```text
