@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import copy
+import datetime as dt
+import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
+import shutil
+import tempfile
+from dataclasses import dataclass
 import re
 from typing import Any, Dict, Optional
 
@@ -28,6 +33,33 @@ class ConfigPaths:
     backup_dir: Path
 
 
+@dataclass(frozen=True)
+class SaveResult:
+    provider_menu: Path
+    model_catalog: Path
+    config_toml: Path
+    backups: tuple[Path, ...]
+
+
+@dataclass
+class ConfigBundle:
+    paths: ConfigPaths
+    providers: list[dict[str, Any]]
+    provider_menu: ProviderMenuConfig
+    model_catalog: ModelCatalog
+    root_updates: dict[str, Any]
+
+
+_GUI_SETTING_KEYS = {
+    "portable_root",
+    "codex_home",
+    "provider_menu",
+    "config_toml",
+    "model_catalog",
+    "backup_dir",
+}
+
+
 def default_config_paths(codex_home: Optional[Path] = None) -> ConfigPaths:
     home = Path(codex_home or os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
     return ConfigPaths(
@@ -40,6 +72,94 @@ def default_config_paths(codex_home: Optional[Path] = None) -> ConfigPaths:
         / "settings.json",
         backup_dir=home / "backups",
     )
+
+
+def load_json(path: Path, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    candidate = Path(path).expanduser()
+    if not candidate.exists():
+        if default is None:
+            raise PatchError(f"JSON file does not exist: {candidate}")
+        return copy.deepcopy(default)
+    try:
+        value = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PatchError(f"Cannot read valid JSON from {candidate}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise PatchError(f"JSON root must be an object: {candidate}")
+    return value
+
+
+def backup_file(path: Path, backup_dir: Path) -> Optional[Path]:
+    source = Path(path).expanduser()
+    if not source.exists():
+        return None
+    destination_dir = Path(backup_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    destination = destination_dir / f"{source.name}.bak-{stamp}"
+    counter = 1
+    while destination.exists():
+        destination = destination_dir / f"{source.name}.bak-{stamp}-{counter}"
+        counter += 1
+    try:
+        shutil.copy2(source, destination)
+    except OSError as exc:
+        raise PatchError(f"Cannot back up {source} to {destination}: {exc}") from exc
+    return destination
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    destination = Path(path).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.",
+        dir=destination.parent,
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def atomic_write_json(
+    path: Path,
+    data: Dict[str, Any],
+    backup_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    destination = Path(path).expanduser()
+    original_backup = backup_file(destination, backup_dir) if backup_dir is not None else None
+    try:
+        serialized = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        _atomic_write_text(destination, serialized)
+    except (OSError, TypeError, ValueError) as exc:
+        raise PatchError(f"Cannot write JSON to {destination}: {exc}") from exc
+    return original_backup
+
+
+def load_gui_settings(path: Path) -> Dict[str, Any]:
+    return load_json(path, {})
+
+
+def save_gui_settings(path: Path, settings: Dict[str, Any]) -> None:
+    filtered = {
+        key: value
+        for key, value in settings.items()
+        if key in _GUI_SETTING_KEYS and isinstance(value, (str, int, float, bool))
+    }
+    try:
+        _atomic_write_text(
+            Path(path).expanduser(),
+            json.dumps(filtered, indent=2, ensure_ascii=False) + "\n",
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise PatchError(f"Cannot write GUI settings: {exc}") from exc
 
 
 def _require_non_empty_string(value: Any, message: str) -> str:

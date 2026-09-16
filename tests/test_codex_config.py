@@ -59,5 +59,46 @@ class ConfigValidationTests(unittest.TestCase):
             )
 
 
+class PersistenceTests(unittest.TestCase):
+    def test_atomic_json_write_keeps_original_in_timestamped_backup(self):
+        from codex_config import atomic_write_json
+
+        with tempfile.TemporaryDirectory() as directory:
+            tmp_path = Path(directory)
+            target = tmp_path / "desktop-model-providers.json"
+            target.write_text('{"version": 1}\n', encoding="utf-8")
+
+            backup = atomic_write_json(
+                target,
+                {"version": 1, "changed": True},
+                tmp_path / "backups",
+            )
+
+            self.assertIsNotNone(backup)
+            self.assertEqual(backup.read_text(encoding="utf-8"), '{"version": 1}\n')
+            self.assertTrue(json.loads(target.read_text(encoding="utf-8"))["changed"])
+
+    def test_gui_settings_never_persist_secret_keys(self):
+        from codex_config import save_gui_settings
+
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            save_gui_settings(
+                settings_path,
+                {"portable_root": "D:\\Apps", "api_key": "secret"},
+            )
+
+            saved = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved, {"portable_root": "D:\\Apps"})
+
+    def test_load_json_returns_default_for_missing_file(self):
+        from codex_config import load_json
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = load_json(Path(directory) / "missing.json", {"version": 1})
+
+            self.assertEqual(result, {"version": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
