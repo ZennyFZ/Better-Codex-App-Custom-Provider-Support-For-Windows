@@ -46,6 +46,7 @@ CLASSIC_RED = "#ffadad"
 
 GWL_STYLE = -16
 WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOZORDER = 0x0004
@@ -111,8 +112,8 @@ def _default_codex_home() -> Path:
 
 
 def strip_caption_style(window_style: int) -> int:
-    """Remove the native caption while preserving the rest of the window style."""
-    return int(window_style) & ~WS_CAPTION
+    """Remove the native caption and resize frame from the window style."""
+    return int(window_style) & ~(WS_CAPTION | WS_THICKFRAME)
 
 
 def _top_level_hwnd(root) -> int:
@@ -248,6 +249,9 @@ class TerminalPatcherUi:
         self.root.update_idletasks()
         if not hide_native_title_bar(self.root):
             self.root.overrideredirect(True)
+        # Tk's geometry is the client size. Reset it after the non-client frame
+        # changes so the borderless window does not grow by the old frame size.
+        self.root.geometry(spec["geometry"])
         self.root.protocol("WM_DELETE_WINDOW", self._close_window)
 
         self._default_paths = codex_config.default_config_paths()
