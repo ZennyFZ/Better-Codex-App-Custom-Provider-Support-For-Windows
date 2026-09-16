@@ -54,31 +54,18 @@ def format_log_line(level: str, message: str) -> str:
 def build_classic_ui_spec() -> dict[str, Any]:
     """Return the small Win32-style layout contract used by the GUI."""
     return {
-        "geometry": "620x600",
+        "geometry": "620x460",
         "background": CLASSIC_BG,
         "fields": ("Portable root (required):", "Backup directory (optional):"),
         "buttons": ("CHECK ONLY", "PATCH", "CLEAR LOG"),
         "pages": ("Setup",),
         "actions": ("CHECK ONLY", "PATCH"),
+        "visible_sections": ("Patch target", "Activity log"),
         "action_labels": {
             "CHECK ONLY": "CHECK ONLY",
             "PATCH": "PATCH",
         },
-        "workflow_steps": (
-            "1. Edit providers and models in the Codex files yourself",
-            "2. Choose the extracted portable root",
-            "3. CHECK ONLY to scan without changing files",
-            "4. PATCH to backup and patch app.asar",
-        ),
-        "next_action": "Choose Portable root, then click CHECK ONLY.",
-        "page_help": {
-            "Setup": "Choose the portable folder and patch it; providers and models are edited outside this tool.",
-        },
-        "manual_edit_note": (
-            "This tool does not edit, create, or validate provider/model configuration files. "
-            "Use a text editor before patching."
-        ),
-        "manual_files": ("config.toml", "desktop-model-providers.json", "custom.json"),
+        "patch_note": "CHECK ONLY scans. PATCH backs up and replaces app.asar.",
     }
 
 
@@ -115,7 +102,7 @@ class TerminalPatcherUi:
         self.root = tk.Tk()
         self.root.title("Better Codex Windows Portable Patcher")
         self.root.geometry(spec["geometry"])
-        self.root.minsize(560, 520)
+        self.root.minsize(560, 360)
         self.root.configure(bg=spec["background"])
         self.root.protocol("WM_DELETE_WINDOW", self._close_window)
 
@@ -151,63 +138,16 @@ class TerminalPatcherUi:
         self.root_updates: dict[str, Any] = {}
         self._page = "Setup"
         self.status_var = tk.StringVar(value="READY")
-        self.next_action_var = tk.StringVar(value=spec["next_action"])
         self._events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self._worker: Optional[threading.Thread] = None
         self._running = False
 
         self._build_widgets()
         self.root.after(100, self._drain_events)
-        self._write_log("INFO", "Edit provider/model files manually, then choose Portable root.")
-        self._write_log("INFO", "Use CHECK ONLY first; use PATCH only after the scan passes.")
-        self._write_log("INFO", "The installed MSIX is never changed or launched.")
 
     def _build_widgets(self) -> None:
         outer = tk.Frame(self.root, background=CLASSIC_BG, padx=8, pady=8)
         outer.pack(fill="both", expand=True)
-
-        title = tk.Label(
-            outer,
-            text="Better Codex Windows Portable Patcher",
-            background=CLASSIC_BG,
-            foreground=CLASSIC_TEXT,
-            anchor="w",
-            font=("Segoe UI", 10, "bold"),
-        )
-        title.pack(fill="x", pady=(0, 5))
-        tk.Label(
-            outer,
-            text="Patch the extracted official MSIX folder; the installed app is left untouched.",
-            background=CLASSIC_BG,
-            foreground=CLASSIC_MUTED,
-            anchor="w",
-            font=("Segoe UI", 8),
-        ).pack(fill="x", pady=(0, 6))
-
-        guide = self._label_frame(outer, "How to use (patch only)")
-        guide.pack(fill="x", pady=(0, 6))
-        workflow = "  ->  ".join(build_classic_ui_spec()["workflow_steps"])
-        tk.Label(
-            guide,
-            text=workflow,
-            background=CLASSIC_PANEL,
-            foreground=CLASSIC_TEXT,
-            justify="left",
-            anchor="w",
-            wraplength=585,
-            font=("Segoe UI", 8),
-        ).pack(fill="x")
-        tk.Label(
-            guide,
-            textvariable=self.next_action_var,
-            background=CLASSIC_FIELD,
-            foreground=CLASSIC_YELLOW,
-            justify="left",
-            anchor="w",
-            padx=5,
-            pady=3,
-            font=("Segoe UI", 8, "bold"),
-        ).pack(fill="x", pady=(4, 0))
 
         self.page_buttons: dict[str, Any] = {}
 
@@ -257,22 +197,6 @@ class TerminalPatcherUi:
 
         footer = tk.Frame(outer, background=CLASSIC_BG)
         footer.pack(fill="x")
-        tk.Label(
-            footer,
-            textvariable=self.status_var,
-            background=CLASSIC_BG,
-            foreground=CLASSIC_MUTED,
-            anchor="w",
-            font=("Segoe UI", 8),
-        ).pack(side="left", padx=(0, 8))
-        tk.Label(
-            footer,
-            textvariable=self.next_action_var,
-            background=CLASSIC_BG,
-            foreground=CLASSIC_CYAN,
-            anchor="w",
-            font=("Segoe UI", 8),
-        ).pack(side="left", fill="x", expand=True)
         labels = build_classic_ui_spec()["action_labels"]
         self.clear_button = self._classic_button(footer, "CLEAR LOG", self._clear_log)
         self.clear_button.pack(side="right", padx=(5, 0))
@@ -364,59 +288,11 @@ class TerminalPatcherUi:
         page = tk.Frame(self.page_frame, background=CLASSIC_BG)
         page.pack(fill="both", expand=True)
 
-        self._page_intro(page, "Setup")
-        manual = self._label_frame(page, "Edit configuration manually")
-        manual.pack(fill="x", pady=(0, 6))
-        tk.Label(
-            manual,
-            text=build_classic_ui_spec()["manual_edit_note"],
-            background=CLASSIC_PANEL,
-            foreground=CLASSIC_TEXT,
-            justify="left",
-            anchor="w",
-            wraplength=580,
-            font=("Segoe UI", 8),
-        ).pack(fill="x", pady=(0, 4))
-        codex_home = Path(self.codex_home_var.get().strip() or _default_codex_home()).expanduser()
-        file_rows = tk.Frame(manual, background=CLASSIC_PANEL)
-        file_rows.pack(fill="x")
-        file_rows.columnconfigure(1, weight=1)
-        manual_paths = (
-            ("config.toml:", Path(self.config_toml_var.get().strip() or codex_home / "config.toml")),
-            (
-                "Provider menu JSON:",
-                Path(self.provider_menu_var.get().strip() or codex_home / "desktop-model-providers.json"),
-            ),
-            (
-                "Model catalog JSON:",
-                Path(self.model_catalog_var.get().strip() or codex_home / "model-catalogs" / "custom.json"),
-            ),
-        )
-        for row, (label, path) in enumerate(manual_paths):
-            tk.Label(
-                file_rows,
-                text=label,
-                background=CLASSIC_PANEL,
-                foreground=CLASSIC_MUTED,
-                anchor="w",
-                font=("Segoe UI", 8),
-            ).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=1)
-            tk.Label(
-                file_rows,
-                text=str(path),
-                background=CLASSIC_FIELD,
-                foreground=CLASSIC_FIELD_FG,
-                anchor="w",
-                justify="left",
-                wraplength=470,
-                font=("Consolas", 8),
-            ).grid(row=row, column=1, sticky="ew", pady=1)
-
         locations = self._label_frame(page, "Patch target")
-        locations.pack(fill="x", pady=(0, 6))
+        locations.pack(fill="x")
         tk.Label(
             locations,
-            text="Choose the extracted ChatGPT folder. CHECK ONLY scans it; PATCH creates a backup and replaces only app.asar.",
+            text=build_classic_ui_spec()["patch_note"],
             background=CLASSIC_PANEL,
             foreground=CLASSIC_MUTED,
             justify="left",
@@ -1168,9 +1044,6 @@ class TerminalPatcherUi:
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def _set_next_action(self, message: str) -> None:
-        self.next_action_var.set(message)
-
     def _configuration_paths(self) -> codex_config.ConfigPaths:
         codex_home = Path(self.codex_home_var.get().strip() or _default_codex_home()).expanduser()
         config_toml = Path(self.config_toml_var.get().strip() or codex_home / "config.toml").expanduser()
@@ -1322,12 +1195,6 @@ class TerminalPatcherUi:
         self.status_var.set(
             {"check": "CHECKING", "patch": "PATCHING"}[action]
         )
-        self._set_next_action(
-            {
-                "check": "Working: scanning the portable app without changing it...",
-                "patch": "Working: creating a backup and patching the portable app...",
-            }[action]
-        )
         self._worker = threading.Thread(
             target=self._worker_main,
             args=(action, root, config, backup),
@@ -1357,14 +1224,12 @@ class TerminalPatcherUi:
             if action == "check":
                 patch_portable_app(app, config, backup, check_only=True, create_config=False)
                 self._events.put(("log", ("OK", "Layout and current ASAR patch markers are compatible.")))
-                self._events.put(("next", "CHECK ONLY passed. Click PATCH when ready."))
                 return
 
             self._events.put(("log", ("PATCH", "Creating original app.asar backup...")))
             original_backup = patch_portable_app(app, config, backup, create_config=False)
             self._events.put(("log", ("OK", f"Patch complete: {app.asar}")))
             self._events.put(("log", ("OK", f"Backup: {original_backup}")))
-            self._events.put(("next", "Patch complete. Launch the portable app to verify the provider menu."))
         except PatchError as exc:
             self._events.put(("error", str(exc)))
         except Exception as exc:  # Keep unexpected GUI-thread failures visible.
@@ -1391,12 +1256,9 @@ class TerminalPatcherUi:
                     self._load_configuration(payload)
                 elif kind == "saved":
                     self._write_log("OK", "Configuration files were written atomically; existing files were backed up.")
-                elif kind == "next":
-                    self._set_next_action(payload)
                 elif kind == "error":
                     self._write_log("ERROR", payload)
                     self.status_var.set("FAILED")
-                    self._set_next_action("Fix the error in Activity log, then try again.")
                     messagebox.showerror("Portable patch failed", payload)
                 elif kind == "finished":
                     self._running = False
