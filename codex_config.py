@@ -70,7 +70,15 @@ class ConfigBundle:
 def _assert_no_secret_fields(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
-            if str(key).lower() in {"token", "api_key", "access_token", "secret", "password"}:
+            if str(key).lower() in {
+                "token",
+                "api_key",
+                "access_token",
+                "bearer_token",
+                "experimental_bearer_token",
+                "secret",
+                "password",
+            }:
                 raise PatchError("Provider menu must not contain credential fields")
             _assert_no_secret_fields(child)
     elif isinstance(value, list):

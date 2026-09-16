@@ -41,7 +41,7 @@
 - Produces `validate_model_catalog(data: dict[str, Any]) -> None`.
 - Produces `validate_provider_record(provider: dict[str, Any]) -> None`.
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 ```python
 class ConfigValidationTests(unittest.TestCase):
@@ -69,17 +69,17 @@ Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: the new test module fails to import the new interfaces.
 
-- [ ] **Step 2: Implement the contracts and validators**
+- [x] **Step 2: Implement the contracts and validators**
 
 Use `dataclass` records and keep validation independent of Tkinter. Reuse the existing provider-menu schema rules from `windows_portable.py` through a shared helper or a direct import that does not create a cycle. Validate provider IDs, labels, default provider, mapping targets, catalog `models`, unique model slugs, and each model's required `slug`, `display_name`, and `description`.
 
-- [ ] **Step 3: Run the focused tests**
+- [x] **Step 3: Run the focused tests**
 
 Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit the configuration contracts**
+- [x] **Step 4: Commit the configuration contracts**
 
 ```powershell
 git add codex_config.py tests/test_codex_config.py
@@ -99,7 +99,7 @@ git commit -m "Add provider and model configuration contracts"
 - Produces `load_gui_settings(path: Path) -> dict[str, Any]` and `save_gui_settings(path: Path, settings: dict[str, Any]) -> None`.
 - Produces `SaveResult` with `provider_menu: Path`, `model_catalog: Path`, `config_toml: Path`, and `backups: tuple[Path, ...]` fields for the later bundle-save task.
 
-- [ ] **Step 1: Write failing tests for backup and atomic replacement**
+- [x] **Step 1: Write failing tests for backup and atomic replacement**
 
 ```python
 class PersistenceTests(unittest.TestCase):
@@ -125,17 +125,17 @@ Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: FAIL because the safe persistence functions do not exist.
 
-- [ ] **Step 2: Implement safe persistence**
+- [x] **Step 2: Implement safe persistence**
 
 Use a temporary file in the destination directory, flush and `fsync`, then `os.replace`. Back up an existing target before replacement. Filter settings through an allowlist containing only `portable_root`, `codex_home`, `provider_menu`, `config_toml`, `model_catalog`, and `backup_dir`; reject secret-looking keys rather than serializing them.
 
-- [ ] **Step 3: Run focused and regression tests**
+- [x] **Step 3: Run focused and regression tests**
 
 Run: `python -m unittest tests.test_codex_config tests.test_windows_portable -v`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit safe persistence**
+- [x] **Step 4: Commit safe persistence**
 
 ```powershell
 git add codex_config.py tests/test_codex_config.py
@@ -154,7 +154,7 @@ git commit -m "Add atomic configuration persistence and backups"
 - Produces `serialize_toml_string(value: str) -> str`.
 - Produces `provider_toml_section(provider_id: str) -> str`.
 
-- [ ] **Step 1: Write failing TOML preservation tests**
+- [x] **Step 1: Write failing TOML preservation tests**
 
 ```python
 class TomlWriterTests(unittest.TestCase):
@@ -198,17 +198,17 @@ Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: FAIL because TOML read/write functions are not implemented.
 
-- [ ] **Step 2: Implement the targeted writer**
+- [x] **Step 2: Implement the targeted writer**
 
 Parse managed provider sections with `tomllib` when available and a section-aware fallback for Python 3.9. Replace only managed root keys and provider authentication keys, preserve unrelated lines and unknown provider options, quote provider IDs containing TOML punctuation, and append missing sections at EOF. Remove the opposite auth key when switching modes. Never log the token value.
 
-- [ ] **Step 3: Run tests, including a Python 3.9-compatible syntax check**
+- [x] **Step 3: Run tests, including a Python 3.9-compatible syntax check**
 
 Run: `python -m unittest tests.test_codex_config -v` and `python -m py_compile codex_config.py`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit TOML support**
+- [x] **Step 4: Commit TOML support**
 
 ```powershell
 git add codex_config.py tests/test_codex_config.py
@@ -227,7 +227,7 @@ git commit -m "Add safe targeted Codex TOML updates"
 - Produces `credential_summary(provider: dict[str, Any]) -> str`.
 - Produces `validate_credential_mode(provider: dict[str, Any]) -> None`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 class CredentialTests(unittest.TestCase):
@@ -252,17 +252,17 @@ Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: FAIL because credential handling is not implemented.
 
-- [ ] **Step 2: Implement Windows-user environment persistence**
+- [x] **Step 2: Implement Windows-user environment persistence**
 
 Use `winreg.HKEY_CURRENT_USER\\Environment` on Windows, set `os.environ` for the running GUI process, and broadcast `WM_SETTINGCHANGE` when the API is available. Keep a non-Windows test adapter so unit tests never modify the host environment. Validate variable names with `[A-Za-z_][A-Za-z0-9_]*`. Do not place secret values in return values, log messages, or exceptions.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit credential handling**
+- [x] **Step 4: Commit credential handling**
 
 ```powershell
 git add codex_config.py tests/test_codex_config.py
@@ -284,7 +284,7 @@ git commit -m "Add selectable Codex credential modes"
 - Produces `build_provider_menu(providers: list[dict[str, Any]], default_provider: str, mappings: dict[str, str]) -> dict[str, Any]`.
 - Produces `seed_catalog_from_codex(codex_executable: str = "codex") -> dict[str, Any]`.
 
-- [ ] **Step 1: Write failing catalog and menu tests**
+- [x] **Step 1: Write failing catalog and menu tests**
 
 ```python
 class CatalogMenuTests(unittest.TestCase):
@@ -316,17 +316,17 @@ Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: FAIL because catalog/menu operations are not implemented.
 
-- [ ] **Step 2: Implement catalog/menu operations**
+- [x] **Step 2: Implement catalog/menu operations**
 
 Clone with `copy.deepcopy`, replace only basic fields, and preserve unknown fields. For an absent catalog, run `codex debug models --bundled`, parse the single JSON document, and raise a user-facing `PatchError` if the executable is missing or the output is invalid. Keep provider-menu credentials-free and reuse its version-1 schema.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run: `python -m unittest tests.test_codex_config -v`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit catalog/menu operations**
+- [x] **Step 4: Commit catalog/menu operations**
 
 ```powershell
 git add codex_config.py tests/test_codex_config.py
@@ -344,7 +344,7 @@ git commit -m "Add model catalog and provider menu editing"
 - Produces GUI methods `_load_configuration`, `_save_configuration`, `_validate_configuration`, `_add_provider`, `_edit_provider`, `_remove_provider`, `_add_model`, `_edit_model`, `_remove_model`, and `_update_provider_mapping`.
 - Consumes the typed operations from `codex_config.py` and sends all writes through the background worker.
 
-- [ ] **Step 1: Write failing display-free GUI contract tests**
+- [x] **Step 1: Write failing display-free GUI contract tests**
 
 ```python
 class GuiSpecTests(unittest.TestCase):
@@ -362,21 +362,21 @@ Run: `python -m unittest tests.test_windows_gui -v`
 
 Expected: FAIL because the existing classic spec has no editor pages or actions.
 
-- [ ] **Step 2: Implement the compact editor shell**
+- [x] **Step 2: Implement the compact editor shell**
 
 Keep the reference-inspired gray utility styling and use three classic page-selector buttons that switch a single content frame between `Setup`, `Models`, and `Provider menu`. Add Codex home and three file path controls under an advanced location section. Add a list plus editor fields on each page. Use masked token fields, a mode selector, explicit plaintext confirmation, and disabled actions while a worker is active. Keep the activity log and status bar.
 
-- [ ] **Step 3: Implement provider and model form behavior**
+- [x] **Step 3: Implement provider and model form behavior**
 
 Populate provider and model lists from loaded configuration. Validate required fields before adding/updating. Keep model mappings synchronized with provider IDs and expose template selection for new models. Make the default provider a dropdown populated from providers.
 
-- [ ] **Step 4: Run focused GUI tests and compile**
+- [x] **Step 4: Run focused GUI tests and compile**
 
 Run: `python -m unittest tests.test_windows_gui -v` and `python -m py_compile patch_chatgpt_providers_windows_gui.py`
 
 Expected: PASS. Do not require a display server for these tests.
 
-- [ ] **Step 5: Commit the editor shell**
+- [x] **Step 5: Commit the editor shell**
 
 ```powershell
 git add patch_chatgpt_providers_windows_gui.py tests/test_windows_gui.py
@@ -394,7 +394,7 @@ git commit -m "Add GUI provider and model editor pages"
 - Produces `codex_config.save_configuration_bundle(bundle: ConfigBundle) -> SaveResult`.
 - Produces worker actions `load`, `save`, `validate`, `check`, and `patch` with redacted log messages.
 
-- [ ] **Step 1: Write failing integration tests**
+- [x] **Step 1: Write failing integration tests**
 
 ```python
 class ConfigurationIntegrationTests(unittest.TestCase):
@@ -434,25 +434,25 @@ Run: `python -m unittest tests.test_codex_config tests.test_windows_gui -v`
 
 Expected: FAIL because the bundle save service and GUI actions are not connected.
 
-- [ ] **Step 2: Implement configuration bundle save**
+- [x] **Step 2: Implement configuration bundle save**
 
 Validate provider records, menu mappings, catalog, authentication modes, and file paths as one preflight. Back up and atomically write TOML, catalog, and provider menu. Stop on configuration failure before invoking `patch_portable_app`.
 
-- [ ] **Step 3: Wire GUI worker actions**
+- [x] **Step 3: Wire GUI worker actions**
 
 `LOAD` reads the files and updates controls on the UI thread. `SAVE` calls the bundle writer and reports paths without secrets. `VALIDATE` performs preflight only. `CHECK ONLY` calls the existing portable check. `PATCH` saves and validates first, then calls the existing `patch_portable_app` with its default process guard. Preserve the plaintext confirmation dialog and archive confirmation dialog.
 
-- [ ] **Step 4: Update documentation for GUI-only setup**
+- [x] **Step 4: Update documentation for GUI-only setup**
 
 Rewrite the manual sections in `README.md` as optional schema/reference material. Add a short first-run workflow: launch the `.bat`, choose portable root, configure provider/auth/model/menu in the GUI, click Save, click Check Only, close portable ChatGPT, then click Patch. Explain the restart requirement for environment variables and the plaintext warning.
 
-- [ ] **Step 5: Run integration tests**
+- [x] **Step 5: Run integration tests**
 
 Run: `python -m unittest tests.test_codex_config tests.test_windows_gui tests.test_windows_portable -v`
 
 Expected: PASS with no secret values in output.
 
-- [ ] **Step 6: Commit workflow integration**
+- [x] **Step 6: Commit workflow integration**
 
 ```powershell
 git add codex_config.py patch_chatgpt_providers_windows_gui.py tests/test_codex_config.py tests/test_windows_gui.py README.md
@@ -465,7 +465,7 @@ git commit -m "Connect GUI configuration to portable patch workflow"
 - Modify: `docs/superpowers/plans/2026-09-16-user-friendly-configurator.md`
 - Inspect: `launch_windows_portable_patcher.bat`, `README.md`, and all modified Python files
 
-- [ ] **Step 1: Run the complete test suite and syntax checks**
+- [x] **Step 1: Run the complete test suite and syntax checks**
 
 ```powershell
 python -m unittest discover -s tests -v
@@ -476,7 +476,7 @@ git diff --check
 
 Expected: all tests pass, all commands exit successfully, and `git diff --check` reports no whitespace errors.
 
-- [ ] **Step 2: Run the real portable check without patching**
+- [x] **Step 2: Run the real portable check without patching**
 
 ```powershell
 python patch_chatgpt_providers_windows.py --app-root "..\\ChatGPT-x64-portable-20260916" --check-only
@@ -484,10 +484,10 @@ python patch_chatgpt_providers_windows.py --app-root "..\\ChatGPT-x64-portable-2
 
 Expected: the layout and current ASAR markers are compatible; no archive or installed package is changed.
 
-- [ ] **Step 3: Review secret-handling and process safety**
+- [x] **Step 3: Review secret-handling and process safety**
 
 Search the diff with `rg -n "token|api_key|env_key|experimental_bearer_token|ChatGPT\.exe|Popen|Start-Process"` and confirm tokens appear only in serializer/test fixtures, the GUI field handling, and redacted mode summaries. Confirm the GUI never launches ChatGPT and the patch path still checks for running portable processes.
 
-- [ ] **Step 4: Mark completed plan steps and report handoff**
+- [x] **Step 4: Mark completed plan steps and report handoff**
 
 Update the checkboxes only after the corresponding verification has passed. Report the launcher path, first-run GUI workflow, backup behavior, credential-mode limitation, and complete test result.
