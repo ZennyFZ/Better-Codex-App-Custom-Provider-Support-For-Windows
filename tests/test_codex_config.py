@@ -284,5 +284,73 @@ class CatalogMenuTests(unittest.TestCase):
         self.assertEqual(catalog["models"][0]["slug"], "old")
 
 
+class ConfigurationIntegrationTests(unittest.TestCase):
+    def test_configuration_save_writes_menu_catalog_and_toml(self):
+        from codex_config import ConfigBundle, default_config_paths, save_configuration_bundle
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = default_config_paths(Path(directory) / ".codex")
+            bundle = ConfigBundle(
+                paths=paths,
+                providers=[
+                    {
+                        "id": "custom",
+                        "name": "Custom",
+                        "label": "Custom",
+                        "description": "",
+                        "base_url": "https://example.test/v1",
+                        "wire_api": "responses",
+                        "auth_mode": "environment",
+                        "env_key": "CUSTOM_API_KEY",
+                        "token": "",
+                    }
+                ],
+                provider_menu={
+                    "version": 1,
+                    "default_provider": "custom",
+                    "providers": [
+                        {"id": "custom", "label": "Custom", "description": ""}
+                    ],
+                    "model_providers": {"custom/model": "custom"},
+                },
+                model_catalog={
+                    "models": [
+                        {
+                            "slug": "custom/model",
+                            "display_name": "Custom Model",
+                            "description": "",
+                        }
+                    ]
+                },
+                root_updates={"model_catalog_json": str(paths.model_catalog)},
+            )
+
+            result = save_configuration_bundle(bundle)
+
+            self.assertEqual(result.provider_menu, paths.provider_menu)
+            self.assertEqual(
+                json.loads(paths.provider_menu.read_text(encoding="utf-8"))["default_provider"],
+                "custom",
+            )
+            self.assertEqual(
+                json.loads(paths.model_catalog.read_text(encoding="utf-8"))["models"][0]["slug"],
+                "custom/model",
+            )
+            self.assertIn(
+                "model_catalog_json =",
+                paths.config_toml.read_text(encoding="utf-8"),
+            )
+
+    def test_secret_is_absent_from_configuration_log_message(self):
+        import codex_config
+        from patch_chatgpt_providers_windows_gui import format_log_line
+
+        line = format_log_line(
+            "OK",
+            codex_config.credential_summary({"auth_mode": "plaintext", "token": "secret"}),
+        )
+        self.assertNotIn("secret", line)
+
+
 if __name__ == "__main__":
     unittest.main()

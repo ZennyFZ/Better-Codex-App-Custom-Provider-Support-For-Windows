@@ -40,6 +40,12 @@ CLASSIC_CYAN = "#b8d9f0"
 CLASSIC_YELLOW = "#f0d58c"
 CLASSIC_RED = "#ffadad"
 
+BUILTIN_MENU_PROVIDER = {
+    "id": "openai",
+    "label": "ChatGPT / OpenAI",
+    "description": "Built-in provider; uses your signed-in ChatGPT account",
+}
+
 
 def format_log_line(level: str, message: str) -> str:
     return f"[{level.upper()}] {message}"
@@ -100,19 +106,31 @@ class TerminalPatcherUi:
 
         self._default_paths = codex_config.default_config_paths()
         self._default_config_path = self._default_paths.provider_menu
-        self.app_root_var = tk.StringVar(value=str(app_root or ""))
-        self.codex_home_var = tk.StringVar(value=str(self._default_paths.codex_home))
-        self.config_toml_var = tk.StringVar(value=str(self._default_paths.config_toml))
-        self.provider_menu_var = tk.StringVar(value=str(config or self._default_paths.provider_menu))
+        try:
+            saved_settings = codex_config.load_gui_settings(self._default_paths.settings)
+        except PatchError:
+            saved_settings = {}
+        saved_root = saved_settings.get("portable_root", "")
+        saved_codex_home = saved_settings.get("codex_home", self._default_paths.codex_home)
+        saved_toml = saved_settings.get("config_toml", self._default_paths.config_toml)
+        saved_menu = saved_settings.get("provider_menu", self._default_paths.provider_menu)
+        saved_catalog = saved_settings.get("model_catalog", self._default_paths.model_catalog)
+        saved_backup = saved_settings.get("backup_dir", "")
+        self._settings_path = self._default_paths.settings
+        self.app_root_var = tk.StringVar(value=str(app_root or saved_root or ""))
+        self.codex_home_var = tk.StringVar(value=str(saved_codex_home))
+        self.config_toml_var = tk.StringVar(value=str(saved_toml))
+        self.provider_menu_var = tk.StringVar(value=str(config or saved_menu or self._default_paths.provider_menu))
         self.config_var = self.provider_menu_var  # Backwards-compatible name for the old GUI.
-        self.model_catalog_var = tk.StringVar(value=str(self._default_paths.model_catalog))
-        self.backup_dir_var = tk.StringVar(value=str(backup_dir or self._default_paths.backup_dir))
+        self.model_catalog_var = tk.StringVar(value=str(saved_catalog))
+        initial_backup = backup_dir or saved_backup or (Path(app_root) / "backups" if app_root else "")
+        self.backup_dir_var = tk.StringVar(value=str(initial_backup))
         self.providers: list[dict[str, Any]] = []
         self.model_catalog: dict[str, Any] = {"models": []}
         self.provider_menu: dict[str, Any] = {
             "version": 1,
-            "default_provider": "",
-            "providers": [],
+            "default_provider": "openai",
+            "providers": [copy.deepcopy(BUILTIN_MENU_PROVIDER)],
             "model_providers": {},
         }
         self.root_updates: dict[str, Any] = {}
@@ -503,14 +521,18 @@ class TerminalPatcherUi:
             "context_window": tk.StringVar(),
             "input_modalities": tk.StringVar(),
             "output_modalities": tk.StringVar(),
+            "supported_reasoning_levels": tk.StringVar(),
             "visibility": tk.StringVar(),
             "supports_tools": tk.StringVar(),
+            "api_availability": tk.StringVar(),
         }
         self._entry_row(advanced, 0, "Context window:", self.model_advanced_vars["context_window"])
         self._entry_row(advanced, 1, "Input modalities:", self.model_advanced_vars["input_modalities"])
         self._entry_row(advanced, 2, "Output modalities:", self.model_advanced_vars["output_modalities"])
-        self._entry_row(advanced, 3, "Visibility:", self.model_advanced_vars["visibility"])
-        self._entry_row(advanced, 4, "Supports tools:", self.model_advanced_vars["supports_tools"])
+        self._entry_row(advanced, 3, "Reasoning levels:", self.model_advanced_vars["supported_reasoning_levels"])
+        self._entry_row(advanced, 4, "Visibility:", self.model_advanced_vars["visibility"])
+        self._entry_row(advanced, 5, "Supports tools:", self.model_advanced_vars["supports_tools"])
+        self._entry_row(advanced, 6, "API availability:", self.model_advanced_vars["api_availability"])
         tk.Label(
             editor,
             text="New models inherit all other fields from the selected template.",
@@ -646,6 +668,11 @@ class TerminalPatcherUi:
     def _provider_display(self, provider: dict[str, Any]) -> str:
         return f"{provider.get('id', '')} - {provider.get('label') or provider.get('name', '')}"
 
+    def _all_provider_ids(self) -> list[str]:
+        return [BUILTIN_MENU_PROVIDER["id"]] + [
+            provider.get("id", "") for provider in self.providers
+        ]
+
     def _refresh_provider_list(self) -> None:
         if not hasattr(self, "provider_listbox"):
             return
@@ -702,6 +729,7 @@ class TerminalPatcherUi:
             "auth_mode": self.auth_mode_var.get().strip() or "none",
             "env_key": self.env_key_var.get().strip(),
             "token": self.token_var.get(),
+            "persist_env": self.persist_env_var.get(),
         }
         codex_config.validate_provider_record(provider)
         return provider
@@ -712,6 +740,13 @@ class TerminalPatcherUi:
             if any(item.get("id") == provider["id"] for item in self.providers):
                 raise PatchError(f"Provider id already exists: {provider['id']}")
             self.providers.append(provider)
+            self.provider_menu.setdefault("providers", []).append(
+                {
+                    "id": provider["id"],
+                    "label": provider["label"],
+                    "description": provider["description"],
+                }
+            )
             if not self.provider_menu.get("default_provider"):
                 self.provider_menu["default_provider"] = provider["id"]
             self._refresh_provider_list()
@@ -775,7 +810,7 @@ class TerminalPatcherUi:
         self.model_listbox.delete(0, "end")
         for model in self.model_catalog.get("models", []):
             self.model_listbox.insert("end", f"{model.get('slug', '')} - {model.get('display_name', '')}")
-        provider_ids = [provider.get("id", "") for provider in self.providers]
+        provider_ids = self._all_provider_ids()
         self._set_option_values(self.model_provider_menu, self.model_provider_var, provider_ids)
         model_slugs = [model.get("slug", "") for model in self.model_catalog.get("models", [])]
         self._set_option_values(self.model_template_menu, self.model_template_var, [""] + model_slugs)
@@ -804,6 +839,8 @@ class TerminalPatcherUi:
 
     def _display_advanced_value(self, value: Any) -> str:
         if isinstance(value, list):
+            if value and all(isinstance(item, dict) for item in value):
+                return ", ".join(str(item.get("effort", "")) for item in value)
             return ", ".join(str(item) for item in value)
         return "" if value is None else str(value)
 
@@ -839,6 +876,14 @@ class TerminalPatcherUi:
             if not value:
                 continue
             if key in {"input_modalities", "output_modalities"}:
+                model[key] = [part.strip() for part in value.split(",") if part.strip()]
+            elif key == "supported_reasoning_levels":
+                model[key] = [
+                    {"effort": part.strip(), "description": ""}
+                    for part in value.split(",")
+                    if part.strip()
+                ]
+            elif key == "api_availability":
                 model[key] = [part.strip() for part in value.split(",") if part.strip()]
             elif key == "context_window":
                 try:
@@ -906,7 +951,7 @@ class TerminalPatcherUi:
         self.menu_provider_listbox.delete(0, "end")
         for provider in menu_providers:
             self.menu_provider_listbox.insert("end", self._provider_display(provider))
-        provider_ids = [provider.get("id", "") for provider in self.providers]
+        provider_ids = self._all_provider_ids()
         self._set_option_values(self.default_provider_menu, self.default_provider_var, provider_ids)
         if self.provider_menu.get("default_provider") in provider_ids:
             self.default_provider_var.set(self.provider_menu["default_provider"])
@@ -987,7 +1032,7 @@ class TerminalPatcherUi:
         if not model_slug or not provider_id:
             self._write_log("ERROR", "Choose both a model slug and a provider for the mapping.")
             return
-        if provider_id not in {provider.get("id") for provider in self.providers}:
+        if provider_id not in set(self._all_provider_ids()):
             self._write_log("ERROR", f"Unknown provider: {provider_id}")
             return
         if model_slug not in {model.get("slug") for model in self.model_catalog.get("models", [])}:
@@ -1078,6 +1123,118 @@ class TerminalPatcherUi:
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    def _configuration_paths(self) -> codex_config.ConfigPaths:
+        codex_home = Path(self.codex_home_var.get().strip() or _default_codex_home()).expanduser()
+        config_toml = Path(self.config_toml_var.get().strip() or codex_home / "config.toml").expanduser()
+        provider_menu = Path(self.provider_menu_var.get().strip() or codex_home / "desktop-model-providers.json").expanduser()
+        model_catalog = Path(self.model_catalog_var.get().strip() or codex_home / "model-catalogs" / "custom.json").expanduser()
+        backup_dir = Path(self.backup_dir_var.get().strip() or codex_home / "backups").expanduser()
+        defaults = codex_config.default_config_paths(codex_home)
+        return codex_config.ConfigPaths(
+            codex_home=codex_home,
+            config_toml=config_toml,
+            provider_menu=provider_menu,
+            model_catalog=model_catalog,
+            settings=defaults.settings,
+            backup_dir=backup_dir,
+        )
+
+    def _commit_menu_controls(self) -> None:
+        if hasattr(self, "default_provider_var"):
+            self.provider_menu["default_provider"] = self.default_provider_var.get().strip()
+        if hasattr(self, "menu_provider_listbox"):
+            selection = self.menu_provider_listbox.curselection()
+            if selection and self.menu_label_var.get().strip():
+                item = self.provider_menu["providers"][selection[0]]
+                item["label"] = self.menu_label_var.get().strip()
+                item["description"] = self.menu_description_var.get().strip()
+
+    def _configuration_bundle(self, paths: Optional[codex_config.ConfigPaths] = None) -> codex_config.ConfigBundle:
+        self._commit_menu_controls()
+        paths = paths or self._configuration_paths()
+        return codex_config.ConfigBundle(
+            paths=paths,
+            providers=copy.deepcopy(self.providers),
+            provider_menu=copy.deepcopy(self.provider_menu),
+            model_catalog=copy.deepcopy(self.model_catalog),
+            root_updates=copy.deepcopy(self.root_updates),
+        )
+
+    def _provider_records_from_toml(self, managed: dict[str, Any]) -> list[dict[str, Any]]:
+        records = []
+        for provider_id, values in managed.get("providers", {}).items():
+            if not isinstance(values, dict):
+                continue
+            token = values.get("experimental_bearer_token")
+            env_key = values.get("env_key", "")
+            if token is not None:
+                auth_mode = "plaintext"
+            elif env_key:
+                auth_mode = "environment"
+            else:
+                auth_mode = "none"
+            records.append(
+                {
+                    "id": provider_id,
+                    "name": values.get("name") or provider_id,
+                    "label": values.get("name") or provider_id,
+                    "description": "",
+                    "base_url": values.get("base_url", ""),
+                    "wire_api": values.get("wire_api", "responses"),
+                    "auth_mode": auth_mode,
+                    "env_key": env_key,
+                    "token": token or "",
+                    "persist_env": False,
+                }
+            )
+        return records
+
+    def _read_configuration(self, paths: codex_config.ConfigPaths):
+        managed = codex_config.read_managed_toml_config(paths.config_toml)
+        providers = self._provider_records_from_toml(managed)
+        if paths.provider_menu.exists():
+            provider_menu = codex_config.load_provider_menu(paths.provider_menu)
+            codex_config.validate_provider_menu(
+                provider_menu,
+                {item["id"] for item in providers} | {BUILTIN_MENU_PROVIDER["id"]},
+            )
+        elif providers:
+            root_default = managed.get("root", {}).get("model_provider")
+            configured_ids = {item["id"] for item in providers}
+            menu_default = root_default if root_default in configured_ids else providers[0]["id"]
+            provider_menu = codex_config.build_provider_menu(
+                providers,
+                menu_default,
+                {},
+            )
+            provider_menu["providers"].insert(0, copy.deepcopy(BUILTIN_MENU_PROVIDER))
+            if root_default == BUILTIN_MENU_PROVIDER["id"]:
+                provider_menu["default_provider"] = root_default
+        else:
+            provider_menu = {
+                "version": 1,
+                "default_provider": "openai",
+                "providers": [copy.deepcopy(BUILTIN_MENU_PROVIDER)],
+                "model_providers": {},
+            }
+        if paths.model_catalog.exists():
+            model_catalog = codex_config.load_model_catalog(paths.model_catalog)
+        else:
+            model_catalog = codex_config.seed_catalog_from_codex()
+        return providers, provider_menu, model_catalog, managed.get("root", {})
+
+    def _load_configuration(self, loaded=None) -> None:
+        if loaded is None:
+            loaded = self._read_configuration(self._configuration_paths())
+        self.providers, self.provider_menu, self.model_catalog, self.root_updates = loaded
+        self._show_page(self._page)
+
+    def _save_configuration(self, paths: Optional[codex_config.ConfigPaths] = None):
+        return codex_config.save_configuration_bundle(self._configuration_bundle(paths))
+
+    def _validate_configuration(self, paths: Optional[codex_config.ConfigPaths] = None) -> None:
+        codex_config.validate_configuration_bundle(self._configuration_bundle(paths))
+
     def _paths(self) -> tuple[Path, Path, Path]:
         root_text = self.app_root_var.get().strip()
         if not root_text:
@@ -1093,15 +1250,28 @@ class TerminalPatcherUi:
         self._start_worker("load")
 
     def _start_save(self) -> None:
+        if not self._confirm_plaintext_credentials():
+            return
         self._start_worker("save")
 
     def _start_validate(self) -> None:
         self._start_worker("validate")
 
+    def _confirm_plaintext_credentials(self) -> bool:
+        if not any(provider.get("auth_mode") == "plaintext" for provider in self.providers):
+            return True
+        return messagebox.askyesno(
+            "Experimental plaintext authentication",
+            build_classic_ui_spec()["plaintext_warning"]
+            + "\n\nSave this plaintext bearer token to config.toml?",
+        )
+
     def _start_check(self) -> None:
         self._start_worker("check")
 
     def _start_patch(self) -> None:
+        if not self._confirm_plaintext_credentials():
+            return
         if not messagebox.askyesno(
             "Patch portable ChatGPT",
             "Create a backup and replace app.asar in the selected portable folder?\n\n"
@@ -1114,22 +1284,67 @@ class TerminalPatcherUi:
         if self._running:
             return
         try:
-            root, config, backup = self._paths()
+            paths = self._configuration_paths()
+            root: Optional[Path] = None
+            if action in {"check", "patch"}:
+                root, config, backup = self._paths()
+                paths = codex_config.ConfigPaths(
+                    codex_home=paths.codex_home,
+                    config_toml=paths.config_toml,
+                    provider_menu=config,
+                    model_catalog=paths.model_catalog,
+                    settings=paths.settings,
+                    backup_dir=backup,
+                )
+            bundle = self._configuration_bundle(paths) if action in {"save", "validate", "patch"} else None
         except PatchError as exc:
             self._write_log("ERROR", str(exc))
             return
         self._running = True
         self._set_busy(True)
-        self.status_var.set("CHECKING" if action == "check" else "PATCHING")
+        self.status_var.set(
+            {"load": "LOADING", "save": "SAVING", "validate": "VALIDATING", "check": "CHECKING", "patch": "PATCHING"}[action]
+        )
         self._worker = threading.Thread(
             target=self._worker_main,
-            args=(action, root, config, backup),
+            args=(action, root, paths, bundle),
             daemon=True,
         )
         self._worker.start()
 
-    def _worker_main(self, action: str, root: Path, config: Path, backup: Path) -> None:
+    def _worker_main(
+        self,
+        action: str,
+        root: Optional[Path],
+        paths: codex_config.ConfigPaths,
+        bundle: Optional[codex_config.ConfigBundle],
+    ) -> None:
         try:
+            if action == "load":
+                loaded = self._read_configuration(paths)
+                self._events.put(("loaded", loaded))
+                self._events.put(("log", ("OK", "Loaded Codex provider, model, and menu configuration.")))
+                return
+
+            if action == "validate":
+                if bundle is None:
+                    raise PatchError("Configuration bundle was not prepared")
+                codex_config.validate_configuration_bundle(bundle)
+                self._events.put(("log", ("OK", "Configuration fields, mappings, credentials, and paths are valid.")))
+                return
+
+            if action == "save":
+                if bundle is None:
+                    raise PatchError("Configuration bundle was not prepared")
+                result = codex_config.save_configuration_bundle(bundle)
+                self._events.put(("saved", result))
+                self._events.put(("log", ("OK", f"Saved provider menu: {result.provider_menu}")))
+                self._events.put(("log", ("OK", f"Saved model catalog: {result.model_catalog}")))
+                self._events.put(("log", ("OK", f"Saved Codex TOML: {result.config_toml}")))
+                return
+
+            if root is None:
+                raise PatchError("Choose the extracted portable root first")
             self._events.put(("log", ("SCAN", f"Portable root: {root}")))
             app = locate_portable_app(root)
             self._events.put(("log", ("OK", f"Found executable: {app.executable}")))
@@ -1140,11 +1355,16 @@ class TerminalPatcherUi:
                 self._events.put(("error", f"Portable ChatGPT is running (PIDs: {pids}). Close it first."))
                 return
             if action == "check":
-                patch_portable_app(app, config, backup, check_only=True)
+                patch_portable_app(app, paths.provider_menu, paths.backup_dir, check_only=True)
                 self._events.put(("log", ("OK", "Layout and current ASAR patch markers are compatible.")))
                 return
+
+            if bundle is None:
+                raise PatchError("Configuration bundle was not prepared")
+            codex_config.save_configuration_bundle(bundle)
+            self._events.put(("log", ("OK", "Configuration saved and validated before archive patch.")))
             self._events.put(("log", ("PATCH", "Creating original app.asar backup...")))
-            original_backup = patch_portable_app(app, config, backup)
+            original_backup = patch_portable_app(app, paths.provider_menu, paths.backup_dir)
             self._events.put(("log", ("OK", f"Patch complete: {app.asar}")))
             self._events.put(("log", ("OK", f"Backup: {original_backup}")))
         except PatchError as exc:
@@ -1156,6 +1376,9 @@ class TerminalPatcherUi:
 
     def _set_busy(self, busy: bool) -> None:
         state = "disabled" if busy else "normal"
+        self.load_button.configure(state=state)
+        self.save_button.configure(state=state)
+        self.validate_button.configure(state=state)
         self.check_button.configure(state=state)
         self.patch_button.configure(state=state)
         self.clear_button.configure(state=state)
@@ -1167,6 +1390,10 @@ class TerminalPatcherUi:
                 if kind == "log":
                     level, message = payload
                     self._write_log(level, message)
+                elif kind == "loaded":
+                    self._load_configuration(payload)
+                elif kind == "saved":
+                    self._write_log("OK", "Configuration files were written atomically; existing files were backed up.")
                 elif kind == "error":
                     self._write_log("ERROR", payload)
                     self.status_var.set("FAILED")
@@ -1185,6 +1412,20 @@ class TerminalPatcherUi:
         if self._running:
             messagebox.showwarning("Task running", "Wait for the current check or patch to finish.")
             return
+        try:
+            codex_config.save_gui_settings(
+                self._settings_path,
+                {
+                    "portable_root": self.app_root_var.get().strip(),
+                    "codex_home": self.codex_home_var.get().strip(),
+                    "config_toml": self.config_toml_var.get().strip(),
+                    "provider_menu": self.provider_menu_var.get().strip(),
+                    "model_catalog": self.model_catalog_var.get().strip(),
+                    "backup_dir": self.backup_dir_var.get().strip(),
+                },
+            )
+        except PatchError as exc:
+            self._write_log("ERROR", str(exc))
         self.root.destroy()
 
     def run(self) -> None:

@@ -10,7 +10,9 @@ The patch:
 - Keeps tasks from all configured providers visible.
 - Keeps the normal ChatGPT login active for OpenAI models.
 
-This project currently supports **macOS only**.
+This project supports the installed macOS app and a **portable Windows build
+made by extracting the official ChatGPT MSIX**. The Windows helper does not
+install the package and does not modify the installed WindowsApps copy.
 
 > [!CAUTION]
 > Changing the provider in a running conversation/thread does **not** work. The conversation/thread continues using the provider it started with.
@@ -20,10 +22,9 @@ This project currently supports **macOS only**.
 
 ## Requirements
 
-- macOS
-- ChatGPT installed at `/Applications/ChatGPT.app`
 - Python 3.9 or newer
-- Node.js with `npx`
+- macOS: ChatGPT installed at `/Applications/ChatGPT.app` and Node.js with `npx`
+- Windows portable mode: an extracted official x64 MSIX folder; Node.js is not required
 
 ## Install
 
@@ -79,44 +80,117 @@ Codex also supports environment-variable authentication with `env_key`. Do not c
 
 Do not set a global `model_provider` if OpenAI and custom providers should coexist in the desktop app. The patch selects the provider when each new task starts.
 
-## Add custom models to Codex
+## Windows portable mode
 
-Codex loads custom model metadata from the file configured by `model_catalog_json`.
+The Windows version is intentionally portable-only. Download the regular x64
+ChatGPT MSIX from the official [ChatGPT Windows download](https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix), make a byte-identical copy with a `.zip` extension, and extract that copy to a folder. Do not run the MSIX installer.
 
-1. Export the bundled catalog as a starting point:
+The extracted root must contain:
 
-   ```bash
-   mkdir -p ~/.codex/model-catalogs
-   codex debug models --bundled > ~/.codex/model-catalogs/custom.json
-   ```
+```text
+<portable-root>\
+  app\
+    ChatGPT.exe
+    resources\
+      app.asar
+      app.asar.unpacked\
+```
 
-2. Add model objects to the top-level `models` array. Copy an existing entry with similar capabilities, then update its model ID, display name, context window, modalities, reasoning levels, and tool support.
+From this repository, run the check first:
 
-   The model ID is the `slug` value. It must match the model ID expected by the provider, for example:
+```powershell
+python .\patch_chatgpt_providers_windows.py `
+  --app-root 'D:\Apps\ChatGPT-portable' `
+  --check-only
+```
 
-   ```json
-   {
-     "slug": "moonshotai/kimi-k3",
-     "display_name": "Kimi K3 (OpenRouter)",
-     "description": "MoonshotAI Kimi K3 through OpenRouter."
-   }
-   ```
+Then close every process launched from that portable folder and patch it:
 
-   Keep the remaining required fields from the copied entry and adjust them to the model's real capabilities. Do not advertise unsupported tools, modalities, or context-window sizes.
+```powershell
+python .\patch_chatgpt_providers_windows.py `
+  --app-root 'D:\Apps\ChatGPT-portable'
+```
 
-3. Point Codex at the catalog in `~/.codex/config.toml`:
+The helper backs up the original `app.asar`, updates only the two supported
+JavaScript bundles, preserves `app.asar.unpacked`, and atomically replaces the
+archive. It refuses to patch while the portable app is running. Use
+`--backup-dir` and `--config` to select explicit locations. `--allow-running`
+is available only when you understand the risk of modifying an in-use archive.
 
-   ```toml
-   model_catalog_json = "/Users/your-name/.codex/model-catalogs/custom.json"
-   ```
+### Classic utility GUI
 
-4. Restart the app after changing `model_catalog_json` or the model catalog.
+To use the same workflow in a compact classic utility window with folder
+pickers and a live log, run:
 
-Use `codex debug models` to inspect the effective catalog Codex sees.
+```powershell
+python .\patch_chatgpt_providers_windows_gui.py `
+  --app-root 'D:\Apps\ChatGPT-portable'
+```
 
-## Configure the patched provider menu
+The GUI is the recommended Windows workflow: it edits providers, credentials,
+models, model-to-provider mappings, and the patched provider menu without
+opening TOML or JSON in a text editor. The GUI runs archive work in a
+background thread and never installs or launches `ChatGPT.exe`.
 
-The installer creates:
+First run:
+
+1. Double-click `launch_windows_portable_patcher.bat`.
+2. On `Setup`, choose the extracted portable root. The default Codex paths
+   are shown under `Locations (advanced)` and can be changed there.
+3. Add a provider. Choose `environment` to store only `env_key` in
+   `config.toml`; optionally select the checkbox to save its value to the
+   current Windows user's environment. Restart already-running apps after
+   changing an environment variable.
+4. On `Models`, choose a template and add the model slug, display name,
+   description, and provider. The advanced metadata is inherited from the
+   template and can be adjusted in the form.
+5. On `Provider menu`, review labels, choose the default provider, and edit
+   Automatic model mappings.
+6. Click `SAVE`, then `VALIDATE`, then `CHECK ONLY`. Close portable ChatGPT
+   and click `PATCH`.
+
+`plaintext` authentication is available for providers that require a direct
+bearer token, but it is experimental/insecure. The token field is masked and
+the GUI asks for explicit confirmation before saving it as
+`experimental_bearer_token` in `config.toml`. Credentials are never written
+to provider-menu JSON, model catalog JSON, or GUI settings.
+
+For one-click use, double-click `launch_windows_portable_patcher.bat` beside
+the Python files. It opens the GUI without prefilled portable paths; choose
+the extracted folder inside the application.
+
+The default Windows files are:
+
+```text
+%USERPROFILE%\.codex\config.toml
+%USERPROFILE%\.codex\desktop-model-providers.json
+%USERPROFILE%\.codex\model-catalogs\custom.json
+```
+
+Provider API keys must remain in Codex's `config.toml`, never in that JSON
+file. On Windows, `env_key` is the simplest authentication option, for example:
+
+```toml
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+wire_api = "responses"
+env_key = "OPENROUTER_API_KEY"
+```
+
+Set `OPENROUTER_API_KEY` in the environment used to start the portable app,
+then restart ChatGPT after changing `config.toml`. A patch is tied to the
+current JavaScript bundle layout; after a ChatGPT update, rerun `--check-only`
+before patching again.
+
+## Configuration schema reference (optional)
+
+The GUI creates and maintains Codex's custom model catalog. If the catalog is
+missing, `LOAD` attempts to seed it with `codex debug models --bundled`; if
+the CLI is unavailable, select an existing catalog in `Locations (advanced)`.
+The editor clones a template so advanced metadata is not accidentally lost.
+
+The GUI also creates and maintains the patched provider menu:
 
 ```text
 ~/.codex/desktop-model-providers.json
@@ -154,7 +228,7 @@ Example:
 - Every custom provider ID must match a `[model_providers.<id>]` section in `config.toml`.
 - API keys do not belong in this JSON file.
 
-The app reloads this file when the provider menu opens and before a new task starts. Repatching is not required after editing it.
+The app reloads this file when the provider menu opens and before a new task starts. Repatching is not required after editing it, although the GUI's `SAVE` action is preferred because it validates mappings and creates backups.
 
 ## Updates and recovery
 

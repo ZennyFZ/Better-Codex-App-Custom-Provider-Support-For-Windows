@@ -30,6 +30,7 @@ ModelCatalog = Dict[str, Any]
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TOML_BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 _TOML_ASSIGNMENT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=")
+_BUILTIN_PROVIDER_IDS = {"openai"}
 _MANAGED_PROVIDER_FIELDS = {
     "name",
     "base_url",
@@ -64,6 +65,74 @@ class ConfigBundle:
     provider_menu: ProviderMenuConfig
     model_catalog: ModelCatalog
     root_updates: dict[str, Any]
+
+
+def _assert_no_secret_fields(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if str(key).lower() in {"token", "api_key", "access_token", "secret", "password"}:
+                raise PatchError("Provider menu must not contain credential fields")
+            _assert_no_secret_fields(child)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_no_secret_fields(child)
+
+
+def validate_configuration_bundle(bundle: ConfigBundle) -> None:
+    if not isinstance(bundle, ConfigBundle):
+        raise PatchError("Configuration bundle has an invalid type")
+    provider_ids: set[str] = set()
+    for provider in bundle.providers:
+        validate_provider_record(provider)
+        validate_credential_mode(provider)
+        provider_ids.add(provider["id"])
+    validate_provider_menu(bundle.provider_menu, provider_ids | _BUILTIN_PROVIDER_IDS)
+    _assert_no_secret_fields(bundle.provider_menu)
+    validate_model_catalog(bundle.model_catalog)
+
+
+def save_configuration_bundle(bundle: ConfigBundle) -> SaveResult:
+    """Validate and atomically save the three user-editable Codex files."""
+
+    validate_configuration_bundle(bundle)
+
+    root_updates = dict(bundle.root_updates)
+    root_updates.setdefault("model_catalog_json", str(bundle.paths.model_catalog))
+    if bundle.provider_menu.get("default_provider"):
+        root_updates.setdefault("model_provider", bundle.provider_menu["default_provider"])
+
+    backups: list[Path] = []
+    backup = write_codex_config(
+        bundle.paths.config_toml,
+        root_updates,
+        bundle.providers,
+        bundle.paths.backup_dir,
+    )
+    if backup is not None:
+        backups.append(backup)
+    backup = atomic_write_json(
+        bundle.paths.model_catalog,
+        bundle.model_catalog,
+        bundle.paths.backup_dir,
+    )
+    if backup is not None:
+        backups.append(backup)
+    backup = atomic_write_json(
+        bundle.paths.provider_menu,
+        bundle.provider_menu,
+        bundle.paths.backup_dir,
+    )
+    if backup is not None:
+        backups.append(backup)
+    for provider in bundle.providers:
+        if provider.get("auth_mode", "none") == "environment" and provider.get("persist_env"):
+            apply_environment_credential(provider)
+    return SaveResult(
+        provider_menu=bundle.paths.provider_menu,
+        model_catalog=bundle.paths.model_catalog,
+        config_toml=bundle.paths.config_toml,
+        backups=tuple(backups),
+    )
 
 
 _GUI_SETTING_KEYS = {
