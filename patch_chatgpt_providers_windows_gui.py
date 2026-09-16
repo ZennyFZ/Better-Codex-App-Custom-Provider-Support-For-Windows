@@ -148,11 +148,13 @@ class TerminalPatcherUi:
     def _build_widgets(self) -> None:
         outer = tk.Frame(self.root, background=CLASSIC_BG, padx=8, pady=8)
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
 
         self.page_buttons: dict[str, Any] = {}
 
         self.page_frame = tk.Frame(outer, background=CLASSIC_BG)
-        self.page_frame.pack(fill="both", expand=True, pady=(0, 6))
+        self.page_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         self._show_page("Setup")
 
         log_frame = tk.LabelFrame(
@@ -166,7 +168,7 @@ class TerminalPatcherUi:
             pady=5,
             font=("Segoe UI", 9, "bold"),
         )
-        log_frame.pack(fill="both", expand=True, pady=(0, 7))
+        log_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 7))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         self.log = tk.Text(
@@ -196,7 +198,7 @@ class TerminalPatcherUi:
             self.log.tag_configure(level, foreground=color)
 
         footer = tk.Frame(outer, background=CLASSIC_BG)
-        footer.pack(fill="x")
+        footer.grid(row=2, column=0, sticky="ew")
         labels = build_classic_ui_spec()["action_labels"]
         self.clear_button = self._classic_button(footer, "CLEAR LOG", self._clear_log)
         self.clear_button.pack(side="right", padx=(5, 0))

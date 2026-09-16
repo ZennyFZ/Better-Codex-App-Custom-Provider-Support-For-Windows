@@ -79,6 +79,30 @@ class WindowsGuiTests(unittest.TestCase):
         self.assertNotIn("--config", contents)
         self.assertNotIn("--backup-dir", contents)
 
+    def test_compact_window_keeps_action_buttons_visible(self):
+        import tkinter as tk
+
+        from patch_chatgpt_providers_windows_gui import TerminalPatcherUi
+
+        ui = None
+        try:
+            ui = TerminalPatcherUi()
+            ui.root.geometry("560x360")
+            ui.root.update()
+
+            for button in (ui.check_button, ui.patch_button, ui.clear_button):
+                self.assertTrue(button.winfo_ismapped())
+                self.assertLessEqual(
+                    button.winfo_rooty() + button.winfo_height(),
+                    ui.root.winfo_rooty() + ui.root.winfo_height(),
+                )
+            self.assertGreater(ui.clear_button.winfo_rooty(), ui.log.winfo_rooty())
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display is unavailable: {exc}")
+        finally:
+            if ui is not None:
+                ui.root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

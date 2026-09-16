@@ -69,6 +69,20 @@ class ProcessAndBackupTests(unittest.TestCase):
         )
         self.assertEqual(portable.parse_windows_processes('[{"ProcessId": null}]'), [])
 
+    def test_process_scan_suppresses_the_powershell_window(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(
+                portable.subprocess,
+                "run",
+                return_value=mock.Mock(stdout="[]"),
+            ) as run:
+                portable.find_windows_app_processes(Path(temp) / "portable")
+
+            self.assertEqual(
+                run.call_args.kwargs["creationflags"],
+                getattr(portable.subprocess, "CREATE_NO_WINDOW", 0),
+            )
+
     def test_backup_is_byte_identical(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "portable"
